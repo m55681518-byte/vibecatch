@@ -1,0 +1,73 @@
+{
+  "name": "VibeCatch - TikTok & YouTube Audio Streamer",
+  "short_name": "VibeCatch",
+  "description": "Lightning-fast client-side audio streamer & offline downloader for TikTok & YouTube with 3D Visualizer and Zero Backend.",
+  "start_url": "/",
+  "id": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0a0b10",
+  "theme_color": "#0a0b10",
+  "lang": "en-US",
+  "categories": ["music", "entertainment", "utilities", "multimedia"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "share_target": {
+    "action": "/",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+  "shortcuts": [
+    {
+      "name": "Extract Audio",
+      "short_name": "Extract",
+      "description": "Extract stream from TikTok or YouTube link",
+      "url": "/?action=extract",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Offline Library",
+      "short_name": "Library",
+      "description": "Play your saved offline music collection",
+      "url": "/?tab=library",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Audio Equalizer",
+      "short_name": "Equalizer",
+      "description": "Web Audio 10-Band EQ and Bass Booster",
+      "url": "/?tab=studio",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "prefer_related_applications": false
+}
