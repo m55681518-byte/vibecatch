@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Settings as SettingsIcon,
   Palette,
@@ -11,14 +11,31 @@ import {
   Cpu,
   Info,
   CheckCircle2,
+  RefreshCw,
+  Wifi,
+  Download,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { clearAllLocalData } from '../services/db';
+import { probeLocalNode, type LocalNodeInfo } from '../services/localNode';
 
 export const SettingsTab: React.FC = () => {
   const { settings, updateSettings, storageInfo, refreshLibrary, installPrompt, triggerInstallPrompt, isAppInstalled } = useApp();
   const [clearing, setClearing] = useState(false);
   const [clearedNotice, setClearedNotice] = useState(false);
+  const [localNodeInfo, setLocalNodeInfo] = useState<LocalNodeInfo | null>(null);
+  const [localNodeScanning, setLocalNodeScanning] = useState(false);
+
+  useEffect(() => {
+    probeLocalNode().then(setLocalNodeInfo);
+  }, []);
+
+  const handleRescanLocalNode = async () => {
+    setLocalNodeScanning(true);
+    const info = await probeLocalNode();
+    setLocalNodeInfo(info);
+    setLocalNodeScanning(false);
+  };
 
   const handleClearAll = async () => {
     if (!window.confirm('Are you sure you want to delete all cached offline audio, tracks, and playlists?')) {
@@ -154,7 +171,62 @@ export const SettingsTab: React.FC = () => {
         </div>
       </div>
 
-      {/* Section 4: Storage Vault & Cache Reset */}
+      {/* Section 4: Local Node */}
+      <div className="rounded-3xl p-5 bg-[#121424] border border-white/10 space-y-4">
+        <div className="flex items-center space-x-2">
+          <Wifi className="w-4 h-4 text-emerald-400" />
+          <h2 className="text-sm font-bold text-white uppercase tracking-wider font-mono">
+            Local Node
+          </h2>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            {localNodeInfo ? (
+              <>
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span className="text-xs text-emerald-400 font-mono">
+                  Detected on port {localNodeInfo.port} (v{localNodeInfo.version})
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="w-4 h-4 rounded-full bg-red-500/40 inline-block" />
+                <span className="text-xs text-slate-400 font-mono">Not detected on this device</span>
+              </>
+            )}
+          </div>
+          <button
+            onClick={handleRescanLocalNode}
+            disabled={localNodeScanning}
+            className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 transition-all active:scale-95"
+            title="Rescan"
+          >
+            <RefreshCw className={`w-4 h-4 ${localNodeScanning ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 space-y-3">
+          <p className="text-xs text-slate-300 leading-relaxed">
+            The Local Node lets you resolve YouTube audio directly from your own device using your residential IP — no third-party proxies needed.
+          </p>
+          <ol className="text-xs text-slate-400 space-y-1 list-decimal list-inside">
+            <li>Download the script:</li>
+            <li>Requires <span className="text-white font-bold">Node.js 18+</span></li>
+            <li>Run: <code className="text-emerald-300 bg-emerald-500/15 px-1.5 py-0.5 rounded font-mono">node vibecatch-node.mjs</code></li>
+          </ol>
+          <a
+            href="/vibecatch-node.mjs"
+            download="vibecatch-node.mjs"
+            className="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-black text-xs font-bold shadow-glow-cyan transition-all"
+          >
+            <Download className="w-4 h-4" />
+            <span>Download vibecatch-node.mjs</span>
+          </a>
+        </div>
+      </div>
+
+      {/* Section 5: Storage Vault & Cache Reset */}
       <div className="rounded-3xl p-5 bg-[#121424] border border-white/10 space-y-4">
         <div className="flex items-center space-x-2">
           <HardDrive className="w-4 h-4 text-red-400" />

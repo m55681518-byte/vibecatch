@@ -1,5 +1,6 @@
 import { PlatformType, Track, ExtractionResult, ResolutionMetadata, SponsoredItem } from '../types';
 import { raceYouTubeResolvers } from './resolvers';
+import { resolveViaLocalNode } from './localNode';
 
 // Curated library of high-fidelity royalty-free streams for studio matching & offline discovery
 export const CURATED_TRACKS: Track[] = [
@@ -575,7 +576,48 @@ async function extractYouTube3Tier(cleanUrl: string): Promise<ExtractionResult> 
   const thumbnailUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
   const maxResThumb = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
 
-  // Race all free providers concurrently for real audio
+  // Attempt local node first — user's own device resolves YouTube cleanly
+  const localHit = await resolveViaLocalNode(videoId);
+  if (localHit && localHit.audioUrl) {
+    const finalTitle = localHit.title || 'YouTube Audio';
+    const finalArtist = (localHit.artist || 'YouTube Channel').replace(' - Topic', '');
+    const duration = localHit.duration || 210;
+
+    const resolution: ResolutionMetadata = {
+      tier: 'tier1_studio',
+      tierLabel: 'Local Node: Your Device Resolved This',
+      tierDescription: `Audio was resolved locally on your own device via the Local Node. The audio stream was fetched using your residential IP for clean YouTube access.`,
+      sourceConfidence: 99,
+    };
+
+    const track: Track = {
+      id: `yt_${videoId}`,
+      title: finalTitle.slice(0, 100),
+      artist: finalArtist.slice(0, 60),
+      duration,
+      thumbnailUrl: maxResThumb || thumbnailUrl,
+      streamUrl: localHit.audioUrl,
+      platform: 'youtube',
+      originalUrl: cleanUrl,
+      addedAt: Date.now(),
+      playsCount: 850000,
+      isFavorite: false,
+      isOfflineAvailable: false,
+      audioFormat: 'm4a',
+      bitrate: '320kbps',
+      resolution,
+      lyrics: [
+        `🎵 ${finalTitle}`,
+        `👤 Channel / Artist: ${finalArtist}`,
+        `⚡ ${resolution.tierLabel}`,
+        `🎧 High-Definition In-Memory Audio`
+      ]
+    };
+
+    return { success: true, track };
+  }
+
+  // Fall back to public provider race
   const resolved = await raceYouTubeResolvers(videoId);
 
   if (resolved) {
