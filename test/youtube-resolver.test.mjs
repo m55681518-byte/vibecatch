@@ -16,7 +16,7 @@ let cachedMod;
 async function loadResolvers() {
   if (!fs.existsSync(resolversPath)) throw new Error('src/services/resolvers.ts does not exist yet');
   if (cachedMod) return cachedMod;
-  const { build } = await import(path.join(root, 'node_modules', 'esbuild', 'lib', 'main.js'));
+  const { build } = await import(url.pathToFileURL(path.join(root, 'node_modules', 'esbuild', 'lib', 'main.js')).href);
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vc-resolver-test-'));
   const outFile = path.join(tmpDir, 'resolvers.test-build.mjs');
   await build({
@@ -27,7 +27,7 @@ async function loadResolvers() {
     platform: 'browser',
     logLevel: 'silent',
   });
-  cachedMod = await import('file://' + outFile.split(path.sep).join('/'));
+  cachedMod = await import(url.pathToFileURL(outFile).href);
   return cachedMod;
 }
 
