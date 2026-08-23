@@ -5,6 +5,11 @@
 
 import http from 'node:http';
 import { URL } from 'node:url';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import { access, writeFile, rename } from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
 
 // ---------------------------------------------------------------------------
 // PICK_CLIENTS — InnerTube client descriptors to race
@@ -151,6 +156,85 @@ export function parseRangeHeader(h) {
 }
 
 // ---------------------------------------------------------------------------
+// resolveYtDlpPath — find yt-dlp binary (opts > env > vendor > tmp)
+// ---------------------------------------------------------------------------
+
+export function resolveYtDlpPath(opts = {}) {
+  // 1. Explicit override via opts.ytdlpPath — verify file exists
+  if (opts.ytdlpPath) {
+    try { fs.accessSync(opts.ytdlpPath); return opts.ytdlpPath; } catch { return null; }
+  }
+  // 2. Environment variable (cache — stable per process)
+  if (process.env.VIBECATCH_YTDLP_PATH) {
+    if (resolveYtDlpPath._cached !== undefined) return resolveYtDlpPath._cached;
+    resolveYtDlpPath._cached = process.env.VIBECATCH_YTDLP_PATH;
+    return resolveYtDlpPath._cached;
+  }
+  // 3. Vendor directory in repo root
+  try {
+    const root = new URL('../', import.meta.url).pathname;
+    const vendorName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
+    const vendorPath = path.join(root, 'vendor', vendorName);
+    fs.accessSync(vendorPath);
+    resolveYtDlpPath._cached = vendorPath;
+    return vendorPath;
+  } catch {}
+  // 4. Tmp directory (pre-installed or auto-installed)
+  const tmpDir = path.join(os.tmpdir(), 'vibecatch-ytdlp');
+  const tmpName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
+  const tmpPath = path.join(tmpDir, tmpName);
+  try {
+    fs.accessSync(tmpPath);
+    resolveYtDlpPath._cached = tmpPath;
+    return tmpPath;
+  } catch {}
+  return null;
+}
+resolveYtDlpPath._cached = undefined;
+resolveYtDlpPath._installPromise = null;
+
+// ---------------------------------------------------------------------------
+// autoInstallYtDlp — one-time download into tmpdir
+// ---------------------------------------------------------------------------
+
+export function autoInstallYtDlp() {
+  if (resolveYtDlpPath._installPromise) return resolveYtDlpPath._installPromise;
+  resolveYtDlpPath._installPromise = (async () => {
+    try {
+      const tmpDir = path.join(os.tmpdir(), 'vibecatch-ytdlp');
+      const isWin = process.platform === 'win32';
+      const binName = isWin ? 'yt-dlp.exe' : 'yt-dlp';
+      const finalPath = path.join(tmpDir, binName);
+      // Check if already installed
+      try { await access(finalPath); return finalPath; } catch {}
+      const url = isWin
+        ? 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'
+        : 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux';
+      const resp = await fetch(url, { redirect: 'follow' });
+      if (!resp.ok) throw new Error('download failed: ' + resp.status);
+      const buf = Buffer.from(await resp.arrayBuffer());
+      try { fs.mkdirSync(tmpDir, { recursive: true }); } catch {}
+      const partPath = finalPath + '.part';
+      await writeFile(partPath, buf);
+      await rename(partPath, finalPath);
+      return finalPath;
+    } catch (e) {
+      console.error('[vibecatch] yt-dlp auto-install failed:', e.message);
+      return null;
+    }
+  })();
+  return resolveYtDlpPath._installPromise;
+}
+
+// ---------------------------------------------------------------------------
+// sanitizeFilename — strip illegal chars for Content-Disposition
+// ---------------------------------------------------------------------------
+
+export function sanitizeFilename(name) {
+  return String(name || '').replace(/[\\/:*?"<>|]/g, '_').substring(0, 200);
+}
+
+// ---------------------------------------------------------------------------
 // planWindows — contiguous bounded windows covering [start..endInclusive]
 // ---------------------------------------------------------------------------
 
@@ -170,6 +254,7 @@ export function planWindows(start, endInclusive, limit = 1048576) {
 // ---------------------------------------------------------------------------
 
 export function startServer(port, opts = {}) {
+  let _ytdlpStatusCache = null;
   const gvHosts = opts.gvHosts || ['.googlevideo.com'];
   const GV_UA = 'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X)';
   const PRIME_WINDOW = 1024;
@@ -422,6 +507,94 @@ export function startServer(port, opts = {}) {
         try { res.destroy(); } catch {}
       }
 
+      return;
+    }
+
+    // GET /ytdlp-status
+    if (req.method === 'GET' && pathname === '/ytdlp-status') {
+      if (!_ytdlpStatusCache) {
+        const p = resolveYtDlpPath(opts);
+        _ytdlpStatusCache = { available: !!p, path: p };
+      }
+      res.writeHead(200, corsHeaders());
+      res.end(JSON.stringify({ ok: true, available: _ytdlpStatusCache.available, path: _ytdlpStatusCache.path, installing: !!resolveYtDlpPath._installPromise && !_ytdlpStatusCache.available }));
+      return;
+    }
+
+    // GET /download?videoId=<id>[&title=&artist=]
+    if (req.method === 'GET' && pathname === '/download') {
+      const videoId = urlObj.searchParams.get('videoId');
+      if (!videoId) {
+        res.writeHead(400, corsHeaders());
+        res.end(JSON.stringify({ error: 'missing videoId parameter' }));
+        return;
+      }
+      const binary = resolveYtDlpPath(opts);
+      if (!binary) {
+        autoInstallYtDlp();
+        res.writeHead(502, corsHeaders());
+        res.end(JSON.stringify({ error: 'yt-dlp not available — auto-install failed or not yet completed' }));
+        return;
+      }
+      const title = sanitizeFilename(urlObj.searchParams.get('title') || 'YouTube Audio');
+      const filename = title + '.m4a';
+      let child;
+      let bytesSent = false;
+      try {
+        const spawnOpts = process.platform === 'win32' && /\.(cmd|bat)$/i.test(binary) ? { shell: true } : {};
+        child = spawn(binary, [
+          '-f', 'bestaudio[ext=m4a]/bestaudio',
+          '--no-playlist',
+          '--quiet',
+          '--no-warnings',
+          '--no-part',
+          '--newline',
+          '-o', '-',
+          'https://www.youtube.com/watch?v=' + videoId,
+        ], spawnOpts);
+      } catch (e) {
+        res.writeHead(502, corsHeaders());
+        res.end(JSON.stringify({ error: 'failed to launch yt-dlp: ' + e.message }));
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Type': 'audio/mp4',
+        'Content-Disposition': 'attachment; filename="' + filename + '"',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Private-Network': 'true',
+        'Access-Control-Allow-Methods': 'GET,OPTIONS',
+        'Access-Control-Allow-Headers': '*',
+      });
+      child.stdout.on('data', (chunk) => {
+        bytesSent = true;
+        res.write(chunk);
+      });
+      child.on('close', (code) => {
+        if (!bytesSent && code !== 0) {
+          let stderrTail = '';
+          if (child.stderr) {
+            const s = child.stderr;
+            stderrTail = typeof s === 'string' ? s.slice(-200) : '';
+          }
+          if (!res.headersSent) {
+            res.writeHead(502, corsHeaders());
+          }
+          res.end(JSON.stringify({ error: 'yt-dlp exited with code ' + code + (stderrTail ? ': ' + stderrTail : '') }));
+        } else {
+          res.end();
+        }
+      });
+      child.on('error', (e) => {
+        if (!bytesSent) {
+          if (!res.headersSent) {
+            res.writeHead(502, corsHeaders());
+          }
+          res.end(JSON.stringify({ error: 'yt-dlp process error: ' + e.message }));
+        } else {
+          try { res.end(); } catch {}
+        }
+      });
+      req.on('close', () => { if (child && !child.killed) child.kill(); });
       return;
     }
 
