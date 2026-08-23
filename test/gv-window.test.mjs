@@ -90,7 +90,7 @@ describe('G1 full download through windowed relay', () => {
     assert.equal(r.status, 206);
     assert.equal(r.headers['content-range'], `bytes ${off}-${TOTAL - 1}/${TOTAL}`);
     assert.ok(r.body.equals(GV_BODY.subarray(off)), 'tail bytes must match');
-  }).timeout(60000);
+  });
 });
 
 describe('G2 arbitrary mid-offset client range', () => {
