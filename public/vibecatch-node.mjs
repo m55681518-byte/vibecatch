@@ -4,6 +4,7 @@
 // Importing MUST NOT start the server; server starts only when executed directly.
 
 import http from 'node:http';
+import { URL } from 'node:url';
 
 // ---------------------------------------------------------------------------
 // PICK_CLIENTS — InnerTube client descriptors to race
@@ -217,6 +218,66 @@ export function startServer(port) {
       } catch {
         res.writeHead(502, corsHeaders());
         res.end(JSON.stringify({ error: 'all youtube clients failed for this video' }));
+      }
+      return;
+    }
+
+    // GET /stream?url=<upstream-url> — byte-proxy
+    if (req.method === 'GET' && pathname === '/stream') {
+      const rawUrl = urlObj.searchParams.get('url');
+      if (!rawUrl) {
+        res.writeHead(400, corsHeaders());
+        res.end(JSON.stringify({ error: 'missing url parameter' }));
+        return;
+      }
+      let upstream;
+      try {
+        upstream = new URL(rawUrl);
+      } catch {
+        res.writeHead(400, corsHeaders());
+        res.end(JSON.stringify({ error: 'invalid url' }));
+        return;
+      }
+      if (upstream.protocol !== 'http:' && upstream.protocol !== 'https:') {
+        res.writeHead(400, corsHeaders());
+        res.end(JSON.stringify({ error: 'only http/https URLs allowed' }));
+        return;
+      }
+      const fwdHeaders = {};
+      if (req.headers.range) fwdHeaders['Range'] = req.headers.range;
+      try {
+        const upstreamResp = await fetch(upstream.href, { headers: fwdHeaders });
+        if (upstreamResp.status >= 400) {
+          res.writeHead(502, corsHeaders());
+          res.end(JSON.stringify({ error: 'upstream failed: ' + upstreamResp.status }));
+          return;
+        }
+        const respHeaders = {
+          'Content-Type': upstreamResp.headers.get('content-type') || 'application/octet-stream',
+          'Content-Disposition': 'attachment; filename="vibecatch-audio"',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Private-Network': 'true',
+          'Access-Control-Allow-Methods': 'GET,OPTIONS',
+          'Access-Control-Allow-Headers': '*',
+        };
+        const cl = upstreamResp.headers.get('content-length');
+        if (cl) respHeaders['Content-Length'] = cl;
+        const cr = upstreamResp.headers.get('content-range');
+        if (cr) respHeaders['Content-Range'] = cr;
+        const ar = upstreamResp.headers.get('accept-ranges');
+        if (ar) respHeaders['Accept-Ranges'] = ar;
+        res.writeHead(upstreamResp.status, respHeaders);
+        try {
+          for await (const chunk of upstreamResp.body) {
+            res.write(chunk);
+          }
+          res.end();
+        } catch {
+          try { res.end(); } catch {}
+        }
+      } catch {
+        res.writeHead(502, corsHeaders());
+        res.end(JSON.stringify({ error: 'upstream fetch failed' }));
       }
       return;
     }
