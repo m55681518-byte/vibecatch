@@ -138,10 +138,55 @@ export function corsHeaders() {
 }
 
 // ---------------------------------------------------------------------------
+// parseRangeHeader — parse Range header value
+// ---------------------------------------------------------------------------
+
+export function parseRangeHeader(h) {
+  if (typeof h !== 'string') return null;
+  const m = /^bytes=(\d+)-(\d*)$/.exec(h);
+  if (!m) return null;
+  const start = Number(m[1]);
+  const end = m[2] === '' ? undefined : Number(m[2]);
+  return { start, end };
+}
+
+// ---------------------------------------------------------------------------
+// planWindows — contiguous bounded windows covering [start..endInclusive]
+// ---------------------------------------------------------------------------
+
+export function planWindows(start, endInclusive, limit = 1048576) {
+  const windows = [];
+  let s = start;
+  while (s <= endInclusive) {
+    const e = Math.min(s + limit - 1, endInclusive);
+    windows.push([s, e]);
+    s = e + 1;
+  }
+  return windows;
+}
+
+// ---------------------------------------------------------------------------
 // startServer — HTTP server on 127.0.0.1 only
 // ---------------------------------------------------------------------------
 
-export function startServer(port) {
+export function startServer(port, opts = {}) {
+  const gvHosts = opts.gvHosts || ['.googlevideo.com'];
+  const GV_UA = 'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X)';
+  const PRIME_WINDOW = 1024;
+  const gvTotalCache = new Map();
+
+  function isGvHost(hostname) {
+    return gvHosts.some((h) => hostname === h || hostname.endsWith(h));
+  }
+
+  function cacheTotal(url, total) {
+    if (gvTotalCache.size >= 50) {
+      const firstKey = gvTotalCache.keys().next().value;
+      gvTotalCache.delete(firstKey);
+    }
+    gvTotalCache.set(url, { total });
+  }
+
   const server = http.createServer(async (req, res) => {
     const urlObj = new URL(req.url || '/', `http://127.0.0.1:${port}`);
     const pathname = urlObj.pathname;
@@ -243,42 +288,140 @@ export function startServer(port) {
         res.end(JSON.stringify({ error: 'only http/https URLs allowed' }));
         return;
       }
-      const fwdHeaders = {};
-      if (req.headers.range) fwdHeaders['Range'] = req.headers.range;
-      try {
-        const upstreamResp = await fetch(upstream.href, { headers: fwdHeaders });
-        if (upstreamResp.status >= 400) {
+
+      const gated = isGvHost(upstream.hostname);
+
+      if (!gated) {
+        // Simple passthrough for non-gated hosts
+        const fwdHeaders = {};
+        if (req.headers.range) fwdHeaders['Range'] = req.headers.range;
+        try {
+          const upstreamResp = await fetch(upstream.href, { headers: fwdHeaders });
+          if (upstreamResp.status >= 400) {
+            res.writeHead(502, corsHeaders());
+            res.end(JSON.stringify({ error: 'upstream failed: ' + upstreamResp.status }));
+            return;
+          }
+          const respHeaders = {
+            'Content-Type': upstreamResp.headers.get('content-type') || 'application/octet-stream',
+            'Content-Disposition': 'attachment; filename="vibecatch-audio"',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Private-Network': 'true',
+            'Access-Control-Allow-Methods': 'GET,OPTIONS',
+            'Access-Control-Allow-Headers': '*',
+          };
+          const cl = upstreamResp.headers.get('content-length');
+          if (cl) respHeaders['Content-Length'] = cl;
+          const cr = upstreamResp.headers.get('content-range');
+          if (cr) respHeaders['Content-Range'] = cr;
+          const ar = upstreamResp.headers.get('accept-ranges');
+          if (ar) respHeaders['Accept-Ranges'] = ar;
+          res.writeHead(upstreamResp.status, respHeaders);
+          try {
+            for await (const chunk of upstreamResp.body) {
+              res.write(chunk);
+            }
+            res.end();
+          } catch {
+            try { res.end(); } catch {}
+          }
+        } catch {
           res.writeHead(502, corsHeaders());
-          res.end(JSON.stringify({ error: 'upstream failed: ' + upstreamResp.status }));
+          res.end(JSON.stringify({ error: 'upstream fetch failed' }));
+        }
+        return;
+      }
+
+      // ---- GATED UPSTREAM — windowed relay with IOS UA ----
+      const clientRange = parseRangeHeader(req.headers.range);
+
+      // Step 1: Prime with bounded request to unlock URL and discover total size
+      let total, primeBuf, contentType;
+      try {
+        const primeResp = await fetch(upstream.href, {
+          headers: { 'user-agent': GV_UA, 'Range': `bytes=0-${PRIME_WINDOW - 1}` },
+        });
+        if (!primeResp.ok) {
+          res.writeHead(502, corsHeaders());
+          res.end(JSON.stringify({ error: 'upstream failed: ' + primeResp.status }));
           return;
         }
-        const respHeaders = {
-          'Content-Type': upstreamResp.headers.get('content-type') || 'application/octet-stream',
-          'Content-Disposition': 'attachment; filename="vibecatch-audio"',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Private-Network': 'true',
-          'Access-Control-Allow-Methods': 'GET,OPTIONS',
-          'Access-Control-Allow-Headers': '*',
-        };
-        const cl = upstreamResp.headers.get('content-length');
-        if (cl) respHeaders['Content-Length'] = cl;
-        const cr = upstreamResp.headers.get('content-range');
-        if (cr) respHeaders['Content-Range'] = cr;
-        const ar = upstreamResp.headers.get('accept-ranges');
-        if (ar) respHeaders['Accept-Ranges'] = ar;
-        res.writeHead(upstreamResp.status, respHeaders);
-        try {
-          for await (const chunk of upstreamResp.body) {
-            res.write(chunk);
-          }
-          res.end();
-        } catch {
-          try { res.end(); } catch {}
+        const cr = primeResp.headers.get('content-range');
+        const crMatch = /\/(\d+)$/.exec(cr || '');
+        total = crMatch ? Number(crMatch[1]) : null;
+        if (total === null) {
+          res.writeHead(502, corsHeaders());
+          res.end(JSON.stringify({ error: 'could not determine total size' }));
+          return;
         }
+        cacheTotal(upstream.href, total);
+        const ab = await primeResp.arrayBuffer();
+        primeBuf = Buffer.from(ab);
+        contentType = primeResp.headers.get('content-type') || 'application/octet-stream';
       } catch {
         res.writeHead(502, corsHeaders());
         res.end(JSON.stringify({ error: 'upstream fetch failed' }));
+        return;
       }
+
+      // Step 2: Determine effective byte range to serve
+      let effStart, effEnd;
+      if (!clientRange) {
+        effStart = 0;
+        effEnd = total - 1;
+      } else {
+        effStart = clientRange.start;
+        effEnd = clientRange.end === undefined ? total - 1 : Math.min(clientRange.end, total - 1);
+      }
+
+      // Step 3: Build client response headers
+      const respHeaders = {
+        'Content-Type': contentType,
+        'Content-Disposition': 'attachment; filename="vibecatch-audio"',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Private-Network': 'true',
+        'Access-Control-Allow-Methods': 'GET,OPTIONS',
+        'Access-Control-Allow-Headers': '*',
+        'Accept-Ranges': 'bytes',
+      };
+
+      if (clientRange) {
+        respHeaders['Content-Range'] = `bytes ${effStart}-${effEnd}/${total}`;
+        respHeaders['Content-Length'] = String(effEnd - effStart + 1);
+        res.writeHead(206, respHeaders);
+      } else {
+        respHeaders['Content-Length'] = String(total);
+        res.writeHead(200, respHeaders);
+      }
+
+      // Step 4: Stream data — prime overlap + windowed fetches
+      try {
+        if (effStart === 0) {
+          const primeEnd = Math.min(PRIME_WINDOW - 1, effEnd);
+          res.write(primeBuf.subarray(0, primeEnd + 1));
+        }
+
+        const fetchStart = effStart === 0 ? Math.min(PRIME_WINDOW, effEnd + 1) : effStart;
+        if (fetchStart <= effEnd) {
+          const windows = planWindows(fetchStart, effEnd, 1048576);
+          for (const [ws, we] of windows) {
+            const resp = await fetch(upstream.href, {
+              headers: { 'user-agent': GV_UA, 'Range': `bytes=${ws}-${we}` },
+            });
+            if (!resp.ok) {
+              res.destroy();
+              return;
+            }
+            const ab = await resp.arrayBuffer();
+            res.write(Buffer.from(ab));
+          }
+        }
+
+        res.end();
+      } catch {
+        try { res.destroy(); } catch {}
+      }
+
       return;
     }
 
