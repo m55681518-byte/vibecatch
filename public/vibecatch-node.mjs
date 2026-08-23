@@ -156,6 +156,25 @@ export function parseRangeHeader(h) {
 }
 
 // ---------------------------------------------------------------------------
+// resolveCookiesPath — find Netscape cookies.txt (opts > env > tmp)
+// ---------------------------------------------------------------------------
+
+export function resolveCookiesPath(opts = {}) {
+  // 1. Explicit override via opts.cookiesPath — verify file exists
+  if (opts.cookiesPath) {
+    try { fs.accessSync(opts.cookiesPath); return opts.cookiesPath; } catch {}
+  }
+  // 2. Environment variable
+  if (process.env.VIBECATCH_YT_COOKIES) {
+    try { fs.accessSync(process.env.VIBECATCH_YT_COOKIES); return process.env.VIBECATCH_YT_COOKIES; } catch {}
+  }
+  // 3. Tmp directory (standard location)
+  const tmpPath = path.join(os.tmpdir(), 'vibecatch-ytdlp', 'cookies.txt');
+  try { fs.accessSync(tmpPath); return tmpPath; } catch {}
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // resolveYtDlpPath — find yt-dlp binary (opts > env > vendor > tmp)
 // ---------------------------------------------------------------------------
 
@@ -516,8 +535,9 @@ export function startServer(port, opts = {}) {
         const p = resolveYtDlpPath(opts);
         _ytdlpStatusCache = { available: !!p, path: p };
       }
+      const cookiesP = resolveCookiesPath(opts);
       res.writeHead(200, corsHeaders());
-      res.end(JSON.stringify({ ok: true, available: _ytdlpStatusCache.available, path: _ytdlpStatusCache.path, installing: !!resolveYtDlpPath._installPromise && !_ytdlpStatusCache.available }));
+      res.end(JSON.stringify({ ok: true, available: _ytdlpStatusCache.available, path: _ytdlpStatusCache.path, installing: !!resolveYtDlpPath._installPromise && !_ytdlpStatusCache.available, cookiesAvailable: !!cookiesP }));
       return;
     }
 
@@ -542,7 +562,8 @@ export function startServer(port, opts = {}) {
       let bytesSent = false;
       try {
         const spawnOpts = process.platform === 'win32' && /\.(cmd|bat)$/i.test(binary) ? { shell: true } : {};
-        child = spawn(binary, [
+        const cookiesPath = resolveCookiesPath(opts);
+        const baseArgs = [
           '-f', 'bestaudio[ext=m4a]/bestaudio',
           '--no-playlist',
           '--quiet',
@@ -550,8 +571,10 @@ export function startServer(port, opts = {}) {
           '--no-part',
           '--newline',
           '-o', '-',
-          'https://www.youtube.com/watch?v=' + videoId,
-        ], spawnOpts);
+        ];
+        if (cookiesPath) baseArgs.push('--cookies', cookiesPath);
+        baseArgs.push('https://www.youtube.com/watch?v=' + videoId);
+        child = spawn(binary, baseArgs, spawnOpts);
       } catch (e) {
         res.writeHead(502, corsHeaders());
         res.end(JSON.stringify({ error: 'failed to launch yt-dlp: ' + e.message }));

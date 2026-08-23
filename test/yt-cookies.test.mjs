@@ -21,10 +21,15 @@ before(async () => {
   if (!mod.startServer) throw new Error('startServer not exported');
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vc-ytcookies-'));
   // fake binary that echoes its argv as JSON lines to stdout
+  // (%* forwarding is required: without it the inner node sees an empty argv)
+  fs.writeFileSync(
+    path.join(tmpDir, 'fake-ytdlp.mjs'),
+    'process.stdout.write(JSON.stringify(process.argv.slice(2)));\n'
+  );
   fakeBin = path.join(tmpDir, 'fake-ytdlp.cmd');
   fs.writeFileSync(
     fakeBin,
-    '@echo off\r\nnode -e "process.stdout.write(JSON.stringify(process.argv.slice(1)))"\r\n'
+    '@echo off\r\nnode "%~dp0fake-ytdlp.mjs" %*\r\n'
   );
   server = mod.startServer(0, { ytdlpPath: fakeBin, cookiesPath: path.join(tmpDir, 'cookies.txt') });
   await new Promise((r) => server.on('listening', r));
