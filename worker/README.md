@@ -9,7 +9,7 @@
 1. **Node.js ≥ 20** on `$PATH` — yt-dlp auto-detects it as the EJS JS runtime for solving YouTube's JavaScript challenges. Verify: `node --version` then `yt-dlp -J https://www.youtube.com/watch?v=dQw4w9WgXcQ 2>&1 | findstr /C:"jsc:node"` — should print `[jsc:node]`.
 2. **yt-dlp** (latest from pip) — already pinned; includes bundled `yt-dlp-ejs` scripts.
 3. **Bootstrap cookie stub**: On first launch without `VIBECATCH_YT_COOKIES`, the worker auto-writes a minimal Netscape-format stub at `<os.tmpdir>/vibecatch-worker/cookies.txt`. You can pre-provide one via `VIBECATCH_YT_COOKIES=<absolute-path-to-cookies.txt>`. This defeats the YouTube bot-wall on datacenter/residential IPs (proven: journal 055).
-4. **Optional: bgutil PO-token provider** (for full audio downloads on restrictive IPs): install `bgutil-ytdlp-pot-provider` via pip + run its Node HTTP server on 127.0.0.1:4416; set env `VIBECATCH_POT_HTTP=http://127.0.0.1:4416` and the worker auto-selects it. Without it, some videos may return 403 or limited formats — metadata (/resolve) always works; /download succeeds for many videos but may be format-limited on strict CDNs. The worker README documents this; adding a worker URL to `workers.json` enables it per PWA pool rules.
+4. **Optional: bgutil PO-token provider** (for full audio downloads on restrictive IPs): install `bgutil-ytdlp-pot-provider` via pip and run its Node HTTP server on 127.0.0.1:4416 (`git clone`, `npm ci`, `npx tsc`, then `node build/main.js`). yt-dlp auto-detects the running server and generates GVS PO tokens for /download. Without it, some videos may return 403 or limited formats — metadata (/resolve) always works; /download succeeds for many videos but may be format-limited on strict CDNs. The worker itself requires no extra env — yt-dlp picks up the provider automatically when active.
 
 ## Running locally (self-host)
 ```cmd
@@ -21,13 +21,13 @@ Listens on `http://127.0.0.1:8795` (override with `VIBECATCH_WORKER_PORT` or `PO
 
 ## Deploying as remote worker (PWA pool)
 1. Ensure env above is satisfied on the host.
-2. Add its URL to `public/workers.json` as `{"url":"https://<host>:<port>/vibecheck", "notes":"..."}` — the PWA pool will probe `/vibecheck`, then use healthy workers for `/resolve` + `/download`.
+2. Add its URL to `public/workers.json` as `["https://<host>:<port>/vibecheck"]` — the PWA pool will probe `/vibecheck`, then use healthy workers for `/resolve` + `/download`.
 3. The pool gracefully degrades: if no workers respond healthy, the PWA falls back to local Termux node (already shipped; see project README for Termux install).
 
 ## workers.json format
 ```json
 [
-  {"url":"https://my-worker-host.example.com:8795/vibecheck", "notes":"my HF space / self-host"}]
+  "https://my-worker-host.example.com:8795/vibecheck"]
 ```
 If the array is empty or missing, the PWA shows no remote workers and uses local extraction only. Add entries later when a host is ready — no code change needed.
 
