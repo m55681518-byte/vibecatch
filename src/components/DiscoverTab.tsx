@@ -21,6 +21,8 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { extractMedia, CURATED_TRACKS, detectPlatform } from '../services/extractor';
+import { isAndroidDevice, buildSetupCommand, shouldShowSetupCard } from '../services/androidSetup';
+import { probeLocalNode } from '../services/localNode';
 import { Track } from '../types';
 import { downloadProjectZip } from '../assets/projectZipBase64';
 
@@ -41,6 +43,7 @@ export const DiscoverTab: React.FC = () => {
   const [extractedTrack, setExtractedTrack] = useState<Track | null>(null);
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [showTierInfo, setShowTierInfo] = useState(false);
+  const [showSetupCard, setShowSetupCard] = useState(false);
 
   // Auto-fill and auto-extract when intercepted from Android Web Share Target
   useEffect(() => {
@@ -84,6 +87,11 @@ export const DiscoverTab: React.FC = () => {
       }
     } catch (err: any) {
       setExtractionError(err.message || 'Decentralized extraction encountered an error.');
+      // Show Android setup card when extraction fails on Android without a local node
+      const nodeInfo = await probeLocalNode().catch(() => null);
+      if (shouldShowSetupCard({ android: isAndroidDevice(navigator.userAgent), nodeReachable: nodeInfo !== null })) {
+        setShowSetupCard(true);
+      }
     } finally {
       setIsExtracting(false);
     }
@@ -284,6 +292,51 @@ export const DiscoverTab: React.FC = () => {
             <div className="flex items-start space-x-2.5 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs animate-in fade-in">
               <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
               <span>{extractionError}</span>
+            </div>
+          )}
+
+          {/* Android Termux Setup Card */}
+          {showSetupCard && extractionError && (
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-cyan-500/10 border border-emerald-500/30 space-y-3 animate-in fade-in">
+              <div className="flex items-center space-x-2">
+                <Cpu className="w-4 h-4 text-emerald-400" />
+                <h4 className="text-sm font-bold text-emerald-300">Android? Run your own free VibeCatch Node</h4>
+              </div>
+              <p className="text-xs text-slate-300">
+                Install a local node on your phone via Termux — it takes 2 minutes and uses zero servers.
+              </p>
+              <div className="relative group">
+                <code className="block w-full p-3 pr-20 rounded-xl bg-[#090b14] border border-white/10 text-emerald-300 text-xs font-mono break-all select-all">
+                  {buildSetupCommand()}
+                </code>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(buildSetupCommand());
+                  }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-300 text-[11px] font-medium transition-all"
+                >
+                  <Clipboard className="w-3 h-3 inline mr-1" /> Copy
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={async () => {
+                    const nodeInfo = await probeLocalNode().catch(() => null);
+                    if (nodeInfo) {
+                      setShowSetupCard(false);
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-xs font-medium transition-all"
+                >
+                  ↻ Check if node is running
+                </button>
+                <button
+                  onClick={() => setShowSetupCard(false)}
+                  className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-400 text-xs font-medium transition-all"
+                >
+                  Dismiss
+                </button>
+              </div>
             </div>
           )}
         </div>
