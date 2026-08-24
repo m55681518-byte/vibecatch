@@ -1,6 +1,7 @@
 import { PlatformType, Track, ExtractionResult, ResolutionMetadata, SponsoredItem } from '../types';
 import { raceYouTubeResolvers } from './resolvers';
 import { resolveViaLocalNode, buildLocalStreamUrl } from './localNode';
+import { buildLocalDownloadUrl } from './downloadUrl';
 
 // Curated library of high-fidelity royalty-free streams for studio matching & offline discovery
 export const CURATED_TRACKS: Track[] = [
@@ -597,6 +598,7 @@ async function extractYouTube3Tier(cleanUrl: string): Promise<ExtractionResult> 
       duration,
       thumbnailUrl: maxResThumb || thumbnailUrl,
       streamUrl: buildLocalStreamUrl(localHit.port, localHit.audioUrl),
+      downloadUrl: buildLocalDownloadUrl(localHit.port, videoId, finalTitle, finalArtist),
       platform: 'youtube',
       originalUrl: cleanUrl,
       addedAt: Date.now(),

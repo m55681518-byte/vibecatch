@@ -1,6 +1,7 @@
 import confetti from 'canvas-confetti';
 import { Track, DemuxProgress } from '../types';
 import { saveAudioBlob, getAudioBlob, saveTrack } from './db';
+import { pickDownloadUrl, audioFormatMeta } from './downloadUrl';
 
 /**
  * Downloads media audio stream directly in-memory, saves to IndexedDB,
@@ -10,6 +11,7 @@ export async function downloadAudioDirectly(
   track: Track,
   onProgress?: (progress: DemuxProgress) => void
 ): Promise<{ success: boolean; blobUrl?: string; error?: string }> {
+  const { mime: dlMime, ext: dlExt } = audioFormatMeta(track.audioFormat);
   try {
     onProgress?.({
       stage: 'resolving',
@@ -31,7 +33,7 @@ export async function downloadAudioDirectly(
         message: 'Fetching audio chunks directly from CDN...',
       });
 
-      const response = await fetch(track.streamUrl, {
+      const response = await fetch(pickDownloadUrl(track), {
         headers: {
           'Accept': 'audio/*, video/*',
         },
@@ -82,7 +84,7 @@ export async function downloadAudioDirectly(
       });
 
       // Save to IndexedDB for 100% offline persistence
-      await saveAudioBlob(track.id, blob, 'audio/mpeg');
+      await saveAudioBlob(track.id, blob, dlMime);
       
       track.isOfflineAvailable = true;
       track.fileSizeBytes = blob.size;
@@ -99,7 +101,7 @@ export async function downloadAudioDirectly(
 
     // Create Blob URL for instant native download
     const blobUrl = URL.createObjectURL(blob);
-    const filename = `${sanitizeFilename(track.artist)} - ${sanitizeFilename(track.title)}.mp3`;
+    const filename = `${sanitizeFilename(track.artist)} - ${sanitizeFilename(track.title)}.${dlExt}`;
 
     const a = document.createElement('a');
     a.style.display = 'none';
@@ -157,13 +159,13 @@ export async function cacheTrackOffline(
       message: 'Fetching audio for offline cache...',
     });
 
-    const response = await fetch(track.streamUrl);
+    const response = await fetch(pickDownloadUrl(track));
     if (!response.ok) throw new Error('Offline fetch failed');
 
     const buffer = await response.arrayBuffer();
-    const blob = new Blob([buffer], { type: 'audio/mpeg' });
+    const blob = new Blob([buffer], { type: audioFormatMeta(track.audioFormat).mime });
 
-    await saveAudioBlob(track.id, blob, 'audio/mpeg');
+    await saveAudioBlob(track.id, blob, audioFormatMeta(track.audioFormat).mime);
     track.isOfflineAvailable = true;
     track.fileSizeBytes = blob.size;
     await saveTrack(track);
