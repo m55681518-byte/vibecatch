@@ -39,7 +39,7 @@ before(async () => {
   }
   fs.writeFileSync(path.join(tmpDir, 'payload.bin'), FAKE_OUT);
 
-  server = mod.startServer(0, { ytdlpPath: fakeBin });
+  server = mod.startServer(0, { ytdlpPath: fakeBin, stateDir: path.join(tmpDir, 'state') });
   await new Promise((r) => server.on('listening', r));
   port = server.address().port;
 });
@@ -94,7 +94,7 @@ describe('Y2 /download streams FULL audio via yt-dlp', () => {
 describe('Y3 honest failure when no binary available', () => {
   let srv2, port2;
   before(async () => {
-    srv2 = mod.startServer(0, { ytdlpPath: path.join(tmpDir, 'definitely-missing.exe') });
+    srv2 = mod.startServer(0, { ytdlpPath: path.join(tmpDir, 'definitely-missing.exe'), stateDir: path.join(tmpDir, 'state2') });
     await new Promise((r) => srv2.on('listening', r));
     port2 = srv2.address().port;
   });

@@ -18,6 +18,15 @@ export function pickDownloadUrl(track: DownloadSource): string {
 }
 
 /**
+ * Playback source: cached blob > local-node full file (instant via node disk
+ * cache, seekable) > capped preview relay. Never the capped relay when a
+ * full-file endpoint exists.
+ */
+export function playbackSourceFor(track: DownloadSource, blobUrl?: string | null): string {
+  return blobUrl || track.downloadUrl || track.streamUrl;
+}
+
+/**
  * Build the local-node /download URL for a video.
  */
 export function buildLocalDownloadUrl(

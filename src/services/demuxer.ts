@@ -1,7 +1,7 @@
 import confetti from 'canvas-confetti';
 import { Track, DemuxProgress } from '../types';
 import { saveAudioBlob, getAudioBlob, saveTrack } from './db';
-import { pickDownloadUrl, audioFormatMeta } from './downloadUrl';
+import { pickDownloadUrl, audioFormatMeta, playbackSourceFor } from './downloadUrl';
 
 /**
  * Downloads media audio stream directly in-memory, saves to IndexedDB,
@@ -197,7 +197,7 @@ export async function getPlayableAudioUrl(track: Track): Promise<string> {
   } catch (e) {
     console.warn('Failed to retrieve offline blob:', e);
   }
-  return track.streamUrl;
+  return playbackSourceFor(track, null);
 }
 
 /**

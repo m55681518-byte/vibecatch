@@ -202,6 +202,110 @@ export function ensureBootstrapCookies(opts = {}, stateDir) {
 }
 
 // ---------------------------------------------------------------------------
+// Full-file cache — yt-dlp output cached per videoId so playback and repeat
+// downloads are instant, seekable, and never truncated by the keyless cap.
+// ---------------------------------------------------------------------------
+
+export function cacheDirOf(opts = {}) {
+  return path.join(opts.stateDir || path.join(os.tmpdir(), 'vibecatch-ytdlp'), 'cache');
+}
+
+function cacheFinalPath(opts, videoId) {
+  return path.join(cacheDirOf(opts), videoId + '.m4a');
+}
+
+const _inflightCache = new Map();
+
+function buildYtDlpArgs(cookiesPath, videoId) {
+  const args = [
+    '-f', 'bestaudio[ext=m4a]/bestaudio',
+    '--no-playlist',
+    '--quiet',
+    '--no-warnings',
+    '--no-part',
+    '--newline',
+    '-o', '-',
+  ];
+  if (cookiesPath) args.push('--cookies', cookiesPath);
+  args.push('https://www.youtube.com/watch?v=' + videoId);
+  return args;
+}
+
+export function ensureCached(videoId, opts = {}) {
+  const finalP = cacheFinalPath(opts, videoId);
+  try { fs.accessSync(finalP); return Promise.resolve(finalP); } catch {}
+  if (_inflightCache.has(videoId)) return _inflightCache.get(videoId);
+  const binary = resolveYtDlpPath(opts);
+  if (!binary) return Promise.resolve(null);
+  try { fs.mkdirSync(cacheDirOf(opts), { recursive: true }); } catch {}
+  const partP = finalP + '.part';
+  const p = new Promise((resolve) => {
+    let child;
+    try {
+      const spawnOpts = process.platform === 'win32' && /\.(cmd|bat)$/i.test(binary) ? { shell: true } : {};
+      child = spawn(binary, buildYtDlpArgs(resolveCookiesPath(opts), videoId), spawnOpts);
+    } catch { resolve(null); return; }
+    const ws = fs.createWriteStream(partP);
+    let wrote = false;
+    child.stdout.on('data', (c) => { wrote = true; try { ws.write(c); } catch {} });
+    child.on('close', (code) => {
+      ws.end(() => {
+        let out = null;
+        if (code === 0 && wrote) {
+          try { fs.renameSync(partP, finalP); out = finalP; } catch {}
+        } else {
+          try { fs.unlinkSync(partP); } catch {}
+        }
+        _inflightCache.delete(videoId);
+        resolve(out);
+      });
+    });
+    child.on('error', () => {
+      try { ws.end(); } catch {}
+      try { fs.unlinkSync(partP); } catch {}
+      _inflightCache.delete(videoId);
+      resolve(null);
+    });
+  });
+  _inflightCache.set(videoId, p);
+  return p;
+}
+
+function serveAudioFile(res, req, filePath, filename) {
+  let size = 0;
+  try { size = fs.statSync(filePath).size; } catch {
+    res.writeHead(502, corsHeaders());
+    res.end(JSON.stringify({ error: 'cached file vanished' }));
+    return;
+  }
+  const base = {
+    'Content-Type': 'audio/mp4',
+    'Content-Disposition': 'attachment; filename="' + filename + '"',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Private-Network': 'true',
+    'Access-Control-Allow-Methods': 'GET,OPTIONS',
+    'Access-Control-Allow-Headers': '*',
+    'Accept-Ranges': 'bytes',
+  };
+  const range = parseRangeHeader(req.headers && req.headers.range);
+  if (range && range.start < size) {
+    const end = Math.min(range.end === undefined ? size - 1 : range.end, size - 1);
+    base['Content-Range'] = 'bytes ' + range.start + '-' + end + '/' + size;
+    base['Content-Length'] = String(end - range.start + 1);
+    res.writeHead(206, base);
+    const rs = fs.createReadStream(filePath, { start: range.start, end });
+    res.on('close', () => { try { rs.destroy(); } catch {} });
+    rs.pipe(res);
+    return;
+  }
+  base['Content-Length'] = String(size);
+  res.writeHead(200, base);
+  const rs = fs.createReadStream(filePath);
+  res.on('close', () => { try { rs.destroy(); } catch {} });
+  rs.pipe(res);
+}
+
+// ---------------------------------------------------------------------------
 // resolveYtDlpPath — find yt-dlp binary (opts > env > vendor > tmp)
 // ---------------------------------------------------------------------------
 
@@ -391,6 +495,7 @@ export function startServer(port, opts = {}) {
 
       try {
         const result = await Promise.any(clientPromises);
+        try { ensureCached(videoId, opts); } catch {}
         res.writeHead(200, corsHeaders());
         res.end(JSON.stringify(result));
       } catch {
@@ -578,6 +683,27 @@ export function startServer(port, opts = {}) {
         res.end(JSON.stringify({ error: 'missing videoId parameter' }));
         return;
       }
+      const title = sanitizeFilename(urlObj.searchParams.get('title') || 'YouTube Audio');
+      const filename = title + '.m4a';
+      // Warm path — serve straight from the full-file cache (instant + seekable)
+      const finalP = cacheFinalPath(opts, videoId);
+      let cached = false;
+      try { fs.accessSync(finalP); cached = true; } catch {}
+      if (cached) {
+        serveAudioFile(res, req, finalP, filename);
+        return;
+      }
+      // In-flight fill (e.g. prefetch from /resolve)? wait for it, then serve
+      if (_inflightCache.has(videoId)) {
+        const out = await _inflightCache.get(videoId);
+        if (out) {
+          serveAudioFile(res, req, finalP, filename);
+          return;
+        }
+        res.writeHead(502, corsHeaders());
+        res.end(JSON.stringify({ error: 'yt-dlp failed to fetch this video' }));
+        return;
+      }
       const binary = resolveYtDlpPath(opts);
       if (!binary) {
         autoInstallYtDlp();
@@ -585,30 +711,21 @@ export function startServer(port, opts = {}) {
         res.end(JSON.stringify({ error: 'yt-dlp not available — auto-install failed or not yet completed' }));
         return;
       }
-      const title = sanitizeFilename(urlObj.searchParams.get('title') || 'YouTube Audio');
-      const filename = title + '.m4a';
       let child;
-      let bytesSent = false;
       try {
         const spawnOpts = process.platform === 'win32' && /\.(cmd|bat)$/i.test(binary) ? { shell: true } : {};
-        const cookiesPath = resolveCookiesPath(opts);
-        const baseArgs = [
-          '-f', 'bestaudio[ext=m4a]/bestaudio',
-          '--no-playlist',
-          '--quiet',
-          '--no-warnings',
-          '--no-part',
-          '--newline',
-          '-o', '-',
-        ];
-        if (cookiesPath) baseArgs.push('--cookies', cookiesPath);
-        baseArgs.push('https://www.youtube.com/watch?v=' + videoId);
-        child = spawn(binary, baseArgs, spawnOpts);
+        child = spawn(binary, buildYtDlpArgs(resolveCookiesPath(opts), videoId), spawnOpts);
       } catch (e) {
         res.writeHead(502, corsHeaders());
         res.end(JSON.stringify({ error: 'failed to launch yt-dlp: ' + e.message }));
         return;
       }
+      try { fs.mkdirSync(cacheDirOf(opts), { recursive: true }); } catch {}
+      const partP = finalP + '.part';
+      const ws = fs.createWriteStream(partP);
+      let resolveDone;
+      const done = new Promise((r) => { resolveDone = r; });
+      _inflightCache.set(videoId, done);
       const audioHeaders = () => ({
         'Content-Type': 'audio/mp4',
         'Content-Disposition': 'attachment; filename="' + filename + '"',
@@ -620,12 +737,24 @@ export function startServer(port, opts = {}) {
       const stderrChunks = [];
       if (child.stderr) child.stderr.on('data', (d) => { stderrChunks.push(d); });
       let headersSent = false;
+      let bytesSent = false;
       child.stdout.on('data', (chunk) => {
         if (!headersSent) { headersSent = true; res.writeHead(200, audioHeaders()); }
         bytesSent = true;
         res.write(chunk);
+        try { ws.write(chunk); } catch {}
       });
       child.on('close', (code) => {
+        ws.end(() => {
+          let out = null;
+          if (code === 0 && bytesSent) {
+            try { fs.renameSync(partP, finalP); out = finalP; } catch {}
+          } else {
+            try { fs.unlinkSync(partP); } catch {}
+          }
+          _inflightCache.delete(videoId);
+          resolveDone(out);
+        });
         if (!bytesSent) {
           if (res.writableEnded || res.destroyed) return;
           const stderrTail = Buffer.concat(stderrChunks).toString('utf8').slice(-200).trim();
@@ -636,6 +765,9 @@ export function startServer(port, opts = {}) {
         }
       });
       child.on('error', (e) => {
+        try { ws.end(); } catch {}
+        try { fs.unlinkSync(partP); } catch {}
+        _inflightCache.delete(videoId);
         if (!bytesSent) {
           if (!res.headersSent) {
             res.writeHead(502, corsHeaders());
@@ -646,6 +778,22 @@ export function startServer(port, opts = {}) {
         }
       });
       req.on('close', () => { if (child && !child.killed) child.kill(); });
+      return;
+    }
+
+    // GET /cache-status?videoId=<id>
+    if (req.method === 'GET' && pathname === '/cache-status') {
+      const videoId = urlObj.searchParams.get('videoId');
+      if (!videoId) {
+        res.writeHead(400, corsHeaders());
+        res.end(JSON.stringify({ error: 'missing videoId parameter' }));
+        return;
+      }
+      let cached = false;
+      let size = 0;
+      try { size = fs.statSync(cacheFinalPath(opts, videoId)).size; cached = true; } catch {}
+      res.writeHead(200, corsHeaders());
+      res.end(JSON.stringify({ ok: true, videoId, cached, size }));
       return;
     }
 
