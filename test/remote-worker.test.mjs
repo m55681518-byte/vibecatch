@@ -2,7 +2,7 @@
 // A zero-dependency Node HTTP worker that ANY device's browser can use for full-song
 // extraction with no local setup. Contract mirrors the local node so the PWA can
 // treat workers as interchangeable endpoints from a plain JSON list (workers.json).
-import { test, describe } from 'node:test';
+import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -33,11 +33,15 @@ before(async () => {
   // fake yt-dlp .cmd that echoes a deterministic payload; counts spawns
   const counterFile = path.join(tmpDir, 'spawns.log');
   process.env.VIBECATCH_WORKER_COUNTER = counterFile;
+  const argsLog = path.join(tmpDir, 'args.log');
+  process.env.VIBECATCH_WORKER_ARGS = argsLog;
+  globalThis.__vcWorkerArgsLog = argsLog;
   fs.writeFileSync(
     path.join(tmpDir, 'fake-ytdlp.mjs'),
     'import fs from "node:fs";' +
     'const args=process.argv.slice(2);' +
     'fs.appendFileSync(process.env.VIBECATCH_WORKER_COUNTER,"1\\n");' +
+    'fs.appendFileSync(process.env.VIBECATCH_WORKER_ARGS,JSON.stringify(args)+"\\n");' +
     'if(args.some(a=>a==="--dump-json")){process.stdout.write(JSON.stringify({id:"w1",title:"Test Song",duration:180,thumbnail:"https://x/t.jpg"}));}' +
     'else{process.stdout.write(Buffer.from("AUDIOBYTES0123456789"));}\n'
   );
@@ -130,5 +134,25 @@ describe('R5 workers.json manifest exists for the client pool', () => {
     const arr = JSON.parse(fs.readFileSync(p, 'utf8'));
     assert.ok(Array.isArray(arr), 'must be an array');
     for (const u of arr) assert.match(u, /^https:\/\/[a-z0-9.-]+/i, 'each entry must be an https URL: ' + u);
+  });
+});
+
+describe('R6 cookie jar reaches yt-dlp (bot-wall bypass on datacenter IPs)', () => {
+  test('cold /download argv includes --cookies pointing at an existing Netscape jar', { timeout: 30000 }, async () => {
+    const r = await get('/download?videoId=cookievid1&title=Ck');
+    assert.equal(r.status, 200);
+    const lines = fs.readFileSync(globalThis.__vcWorkerArgsLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const last = lines[lines.length - 1];
+    const i = last.indexOf('--cookies');
+    assert.notEqual(i, -1, '--cookies missing from yt-dlp argv: ' + JSON.stringify(last));
+    assert.ok(fs.existsSync(last[i + 1]), 'cookie jar path must exist: ' + last[i + 1]);
+    assert.match(fs.readFileSync(last[i + 1], 'utf8'), /Netscape/, 'jar must be Netscape format');
+  });
+  test('/resolve argv also carries --cookies (metadata hits the same wall)', async () => {
+    await get('/resolve?videoId=cookievid2');
+    const lines = fs.readFileSync(globalThis.__vcWorkerArgsLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const last = lines[lines.length - 1];
+    assert.ok(last.includes('--dump-json'), JSON.stringify(last));
+    assert.notEqual(last.indexOf('--cookies'), -1, '--cookies missing from resolve argv: ' + JSON.stringify(last));
   });
 });
