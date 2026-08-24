@@ -31,7 +31,7 @@ before(async () => {
     fakeBin,
     '@echo off\r\nnode "%~dp0fake-ytdlp.mjs" %*\r\n'
   );
-  server = mod.startServer(0, { ytdlpPath: fakeBin, cookiesPath: path.join(tmpDir, 'cookies.txt') });
+  server = mod.startServer(0, { ytdlpPath: fakeBin, cookiesPath: path.join(tmpDir, 'cookies.txt'), stateDir: path.join(tmpDir, 'state') });
   await new Promise((r) => server.on('listening', r));
   port = server.address().port;
 });
@@ -68,9 +68,10 @@ describe('C1 /download passes --cookies when file exists', () => {
 
 describe('C2 no cookies file -> argv unchanged (no --cookies)', () => {
   test('missing file is skipped silently', async () => {
-    // point at a path we never create
+    // point at a path we never create; distinct videoId so the disk cache
+    // (which stores C1's echoed argv) cannot shadow this fresh spawn
     fs.rmSync(path.join(tmpDir, 'cookies.txt'), { force: true });
-    const r = await getBody('/download?videoId=4_zr_97R5mw');
+    const r = await getBody('/download?videoId=c2nocookies0');
     assert.equal(r.status, 200);
     const argv = JSON.parse(r.body);
     assert.equal(argv.indexOf('--cookies'), -1, 'must not pass --cookies for absent file');
