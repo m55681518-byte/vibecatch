@@ -20,6 +20,7 @@ export interface Track {
   duration: number; // in seconds
   thumbnailUrl: string;
   streamUrl: string;
+  downloadUrl?: string;
   platform: PlatformType;
   originalUrl?: string;
   addedAt: number;
