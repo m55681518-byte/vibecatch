@@ -225,7 +225,14 @@ function buildYtDlpArgs(cookiesPath, videoId) {
     '--no-part',
     '--newline',
     '-o', '-',
+    '--js-runtimes', 'node',
   ];
+  const potRaw = process.env.VIBECATCH_POT_URL !== undefined ? process.env.VIBECATCH_POT_URL : 'http://127.0.0.1:4416';
+  const potUrl = typeof potRaw === 'string' ? potRaw.trim() : '';
+  if (potUrl) {
+    args.push('--extractor-args', 'youtube:player_client=mweb,tv_simply');
+    args.push('--extractor-args', 'youtubepot-bgutilhttp:base_url=' + potUrl);
+  }
   if (cookiesPath) args.push('--cookies', cookiesPath);
   args.push('https://www.youtube.com/watch?v=' + videoId);
   return args;
