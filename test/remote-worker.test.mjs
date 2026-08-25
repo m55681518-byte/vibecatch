@@ -13,7 +13,7 @@ import url from 'node:url';
 const root = path.join(path.dirname(url.fileURLToPath(import.meta.url)), '..');
 const workerPath = path.join(root, 'worker', 'vibecatch-worker.mjs');
 
-let server, baseUrl, tmpDir;
+let server, baseUrl, tmpDir, modRef;
 
 function get(pathname, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -52,6 +52,7 @@ before(async () => {
   if (process.platform !== 'win32') fs.chmodSync(fakeBin, 0o755);
 
   const mod = await import(url.pathToFileURL(workerPath).href);
+  modRef = mod;
   server = mod.startServer(0, { ytdlpPath: fakeBin, stateDir: path.join(tmpDir, 'state') });
   await new Promise((r) => server.on('listening', r));
   const port = server.address().port;
@@ -154,5 +155,80 @@ describe('R6 cookie jar reaches yt-dlp (bot-wall bypass on datacenter IPs)', () 
     const last = lines[lines.length - 1];
     assert.ok(last.includes('--dump-json'), JSON.stringify(last));
     assert.notEqual(last.indexOf('--cookies'), -1, '--cookies missing from resolve argv: ' + JSON.stringify(last));
+  });
+});
+
+describe('R7 SABR-proof client chain reaches yt-dlp argv', () => {
+  test('cold /download argv requests player_client=mweb,tv_simply', { timeout: 30000 }, async () => {
+    const r = await get('/download?videoId=sabrvid1&title=S');
+    assert.equal(r.status, 200);
+    const lines = fs.readFileSync(globalThis.__vcWorkerArgsLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const last = lines[lines.length - 1];
+    const i = last.indexOf('--extractor-args');
+    assert.notEqual(i, -1, '--extractor-args missing from argv: ' + JSON.stringify(last));
+    const pairs = [];
+    for (let k = i; k < last.length - 1; k++) if (last[k] === '--extractor-args') pairs.push(last[k + 1]);
+    const clientArg = pairs.find((s) => /youtube:player_client=/.test(s));
+    assert.ok(clientArg, 'no youtube:player_client extractor-arg found: ' + JSON.stringify(pairs));
+    assert.match(clientArg, /player_client=mweb,tv_simply$/, 'client chain must be exactly mweb,tv_simply: ' + clientArg);
+  });
+});
+
+describe('R8 GVS PO-token provider wired via bgutil HTTP plugin', () => {
+  test('default POT base_url http://127.0.0.1:4416 present in download argv', { timeout: 30000 }, async () => {
+    delete process.env.VIBECATCH_POT_URL;
+    const r = await get('/download?videoId=potvid1&title=P');
+    assert.equal(r.status, 200);
+    const lines = fs.readFileSync(globalThis.__vcWorkerArgsLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const last = lines[lines.length - 1];
+    const pairs = [];
+    for (let k = 0; k < last.length - 1; k++) if (last[k] === '--extractor-args') pairs.push(last[k + 1]);
+    const potArg = pairs.find((s) => /youtubepot-bgutilhttp:base_url=/.test(s));
+    assert.ok(potArg, 'bgutil POT extractor-arg missing: ' + JSON.stringify(pairs));
+    assert.match(potArg, /youtubepot-bgutilhttp:base_url=http:\/\/127\.0\.0\.1:4416$/, 'wrong default POT url: ' + potArg);
+  });
+  test('VIBECATCH_POT_URL override respected; empty string disables POT+client args', { timeout: 30000 }, async () => {
+    process.env.VIBECATCH_POT_URL = 'http://192.0.2.7:9999';
+    const srv = modRef.startServer(0, { ytdlpPath: path.join(tmpDir, 'fake.cmd'), stateDir: path.join(tmpDir, 'state-ovr') });
+    srv.unref();
+    await new Promise((r) => srv.on('listening', r));
+    const p2 = `http://127.0.0.1:${srv.address().port}`;
+    const hit = () => new Promise((resolve, reject) => {
+      const rq = http.request(p2 + '/download?videoId=potvid2&title=P', { headers: { connection: 'close' } }, (rs) => {
+        const c = []; rs.on('data', (d) => c.push(d)); rs.on('end', () => resolve({ status: rs.statusCode }));
+      }); rq.on('error', reject); rq.end();
+    });
+    const r1 = await hit();
+    assert.equal(r1.status, 200);
+    let lines = fs.readFileSync(process.env.VIBECATCH_WORKER_ARGS, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    let last = lines[lines.length - 1];
+    assert.ok(last.some((a) => a === 'youtubepot-bgutilhttp:base_url=http://192.0.2.7:9999'), 'override URL not used: ' + JSON.stringify(last));
+    srv.close();
+
+    process.env.VIBECATCH_POT_URL = '';
+    const srv2 = modRef.startServer(0, { ytdlpPath: path.join(tmpDir, 'fake.cmd'), stateDir: path.join(tmpDir, 'state-off') });
+    srv2.unref();
+    await new Promise((r) => srv2.on('listening', r));
+    const p3 = `http://127.0.0.1:${srv2.address().port}`;
+    const hit3 = () => new Promise((resolve, reject) => {
+      const rq = http.request(p3 + '/download?videoId=potvid3&title=P', { headers: { connection: 'close' } }, (rs) => {
+        const c = []; rs.on('data', (d) => c.push(d)); rs.on('end', () => resolve({ status: rs.statusCode }));
+      }); rq.on('error', reject); rq.end();
+    });
+    const r2 = await hit3();
+    assert.equal(r2.status, 200);
+    lines = fs.readFileSync(process.env.VIBECATCH_WORKER_ARGS, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    last = lines[lines.length - 1];
+    assert.ok(!last.some((a) => String(a).includes('youtubepot')), 'POT args must be absent when disabled: ' + JSON.stringify(last));
+    assert.ok(!last.some((a) => String(a).includes('player_client=')), 'client chain must be absent when POT disabled: ' + JSON.stringify(last));
+    srv2.close();
+    delete process.env.VIBECATCH_POT_URL;
+  });
+});
+
+describe('R9 no CommonJS require() in ESM worker source', () => {
+  test('worker source never calls require(', () => {
+    const src = fs.readFileSync(workerPath, 'utf8');
+    assert.ok(!/\brequire\s*\(/.test(src), 'ESM module must not use require(): regression guard for broken localDownload pattern');
   });
 });
