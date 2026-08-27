@@ -251,9 +251,15 @@ function respawnService(roleKey) {
   startHiddenCmd(CONFIG.toolsDir, path.join(CONFIG.toolsDir, cfg.serviceStart));
 }
 
+export function gitCommand(repoDir, args) {
+  // Fresh deploy clones have NO user.name/email configured (empty global on this box) —
+  // every invocation must carry alliance identity via -c flags to commit/push reliably.
+  return ['-C', repoDir, '-c', 'user.name=alliance', '-c', 'user.email=alliance@users.noreply.github.com', ...args];
+}
+
 function runGit(repoDir, args) {
   try {
-    const r = spawnSync('git', ['-C', repoDir, ...args], { encoding: 'utf8', timeout: 120000 });
+    const r = spawnSync('git', gitCommand(repoDir, args), { encoding: 'utf8', timeout: 120000 });
     if (r.status !== 0) {
       log(`git ${args.join(' ')} exited ${r.status}: ${String(r.stderr || '').slice(0, 400)}`);
       return false;
