@@ -147,3 +147,31 @@ describe('W7 git invocations always carry alliance identity (fresh clones have n
     assert.equal(args[1], 'C:\\deploy-clone');
   });
 });
+
+describe('W8 loop builds the pool from POST-respawn URLs (never stale)', () => {
+  test('respawned role url is what the loop deploys, registered URL is what probe sees', async () => {
+    const mod = await import(url.pathToFileURL(wdPath).href);
+    // simulate a run that just respawned the node tunnel: state file holds the fresh URL,
+    // but if the loop read current[].url it would reuse the OLD tunnel url.
+    const roleState = {
+      roles: {
+        node: { url: 'https://toolbar-schemes-realized-brake.trycloudflare.com', failures: 0 },
+        worker: { url: 'https://garage-verification-und-responsibilities.trycloudflare.com', failures: 0 },
+      },
+    };
+    const pool = mod.buildPool(mod.roleUrls(roleState));
+    assert.deepEqual(pool, [
+      'https://toolbar-schemes-realized-brake.trycloudflare.com/vibecheck',
+      'https://garage-verification-und-responsibilities.trycloudflare.com/vibecheck',
+    ]);
+    assert.deepEqual(mod.roleUrls(roleState), [
+      { role: 'node', url: 'https://toolbar-schemes-realized-brake.trycloudflare.com' },
+      { role: 'worker', url: 'https://garage-verification-und-responsibilities.trycloudflare.com' },
+    ]);
+  });
+  test('roleUrls drops roles with no URL (empty before tunnel registers)', async () => {
+    const mod = await import(url.pathToFileURL(wdPath).href);
+    const rs = { roles: { node: { url: 'https://toolbar-schemes-realized-brake.trycloudflare.com', failures: 0 }, worker: { url: null, failures: 0 } } };
+    assert.deepEqual(mod.roleUrls(rs), [{ role: 'node', url: 'https://toolbar-schemes-realized-brake.trycloudflare.com' }]);
+  });
+});

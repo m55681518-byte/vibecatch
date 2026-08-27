@@ -65,6 +65,15 @@ export function probeHealthy(payload) {
   return true;
 }
 
+export function roleUrls(roleState) {
+  // Single source of truth for the deployed pool: whatever each role recorded LAST
+  // (post-respawn in the same pass). Never derived from a pre-action snapshot, which
+  // is how a stale tunnel URL previously got redeployed after a fresh respawn.
+  return ['node', 'worker']
+    .map((k) => ({ role: k, url: roleState && roleState.roles && roleState.roles[k] ? roleState.roles[k].url : null }))
+    .filter((r) => r.url);
+}
+
 export function buildPool(relays) {
   return relays.map((r) => `${r.url}/vibecheck`);
 }
@@ -339,10 +348,6 @@ export async function runWatchdogLoop(opts = {}) {
   const stateFile = path.join(cfg.toolsDir, 'relay-watchdog-state.json');
   const roleState = loadState(stateFile) || { roles: {} };
 
-  const pool = buildPool(
-    ['node', 'worker'].map((k) => ({ role: k, url: readLastTunnelUrl(cfg.toolsDir, cfg.roles[k].tunnelLog) }))
-  );
-  const current = [];
   const changes = [];
 
   for (const key of ['node', 'worker']) {
@@ -370,12 +375,11 @@ export async function runWatchdogLoop(opts = {}) {
       st.url = url;
     }
     roleState.roles[key] = st;
-    if (url) current.push({ role: key, url });
   }
 
   saveState(stateFile, roleState);
 
-  const newPool = buildPool(current.filter((r) => r.url));
+  const newPool = buildPool(roleUrls(roleState));
   if (changes.length > 0 || !poolUnchanged(newPool, readPoolFile(cfg.repoRoot))) {
     if (newPool.length >= 2) {
       writePoolFile(cfg.repoRoot, newPool);
