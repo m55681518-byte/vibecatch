@@ -27,6 +27,17 @@ export function playbackSourceFor(track: DownloadSource, blobUrl?: string | null
 }
 
 /**
+ * Build a /download URL against an arbitrary base origin (host may include a port).
+ */
+function buildDownloadUrl(base: string, videoId: string, title?: string, artist?: string): string {
+  const params = new URLSearchParams();
+  params.set('videoId', videoId);
+  if (title) params.set('title', title);
+  if (artist) params.set('artist', artist);
+  return `${base}/download?${params.toString()}`;
+}
+
+/**
  * Build the local-node /download URL for a video.
  */
 export function buildLocalDownloadUrl(
@@ -35,11 +46,20 @@ export function buildLocalDownloadUrl(
   title?: string,
   artist?: string
 ): string {
-  const params = new URLSearchParams();
-  params.set('videoId', videoId);
-  if (title) params.set('title', title);
-  if (artist) params.set('artist', artist);
-  return `http://127.0.0.1:${port}/download?${params.toString()}`;
+  return buildDownloadUrl(`http://127.0.0.1:${port}`, videoId, title, artist);
+}
+
+/**
+ * Build the /download URL against a REMOTE relay base (zero-setup phone path).
+ * The base is used verbatim — never rewritten to 127.0.0.1.
+ */
+export function buildRelayDownloadUrl(
+  baseUrl: string,
+  videoId: string,
+  title?: string,
+  artist?: string
+): string {
+  return buildDownloadUrl(baseUrl.replace(/\/+$/, ''), videoId, title, artist);
 }
 
 const AUDIO_MIME: Record<string, string> = {

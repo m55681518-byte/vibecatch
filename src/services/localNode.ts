@@ -4,6 +4,12 @@
 
 export const DEFAULT_PORTS = [8794, 8795];
 
+// Path served alongside the PWA bundle (public/workers.json). Each entry is a
+// "/vibecheck" health endpoint of a RELAY — a node someone hosts and added to
+// the pool. The browser probes them and uses the first healthy one, giving
+// phones a zero-setup download path when no local node is running.
+export const RELAY_MANIFEST_PATH = '/workers.json';
+
 interface ProbeOpts {
   fetchImpl?: typeof fetch;
   ports?: number[];
@@ -19,13 +25,30 @@ export interface LocalNodeInfo {
   version: string;
 }
 
+export interface RelayInfo {
+  baseUrl: string;
+  version: string;
+}
+
+interface RelayProbeOpts {
+  fetchImpl?: typeof fetch;
+  manifestUrl?: string;
+  timeoutMs?: number;
+}
+
+interface RelayResolveOpts {
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}
+
 export interface ResolvedAudio {
   audioUrl: string;
   title: string;
   artist: string;
   duration: number;
-  source: 'local-node';
+  source: 'local-node' | 'relay';
   port: number;
+  baseUrl?: string;
 }
 
 /**
@@ -35,6 +58,13 @@ export interface ResolvedAudio {
  */
 export function buildLocalStreamUrl(port: number, upstreamUrl: string): string {
   return `http://127.0.0.1:${port}/stream?url=${encodeURIComponent(upstreamUrl)}`;
+}
+
+/**
+ * Same relay routing, but against a REMOTE relay base (zero-setup phone path).
+ */
+export function buildRelayStreamUrl(baseUrl: string, upstreamUrl: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}/stream?url=${encodeURIComponent(upstreamUrl)}`;
 }
 
 /**
@@ -162,4 +192,92 @@ export async function resolveViaLocalNode(
   }
 
   return null;
+}
+
+/**
+ * Fetch the relay manifest (workers.json), probe each entry's /vibecheck, and
+ * return the first healthy relay's { baseUrl, version } — or null. NEVER throws.
+ *
+ * The entry URLs must end in "/vibecheck"; the baseUrl is that URL minus the
+ * probe path, e.g. "https://relay.trycloudflare.com/vibecheck" -> base
+ * "https://relay.trycloudflare.com".
+ */
+export async function probeRelayManifest(opts?: RelayProbeOpts): Promise<RelayInfo | null> {
+  const fetchImpl = opts?.fetchImpl ?? fetch;
+  const timeoutMs = opts?.timeoutMs ?? 1200;
+  const manifestUrl =
+    opts?.manifestUrl ??
+    (typeof location !== 'undefined' && location && location.origin
+      ? location.origin + RELAY_MANIFEST_PATH
+      : RELAY_MANIFEST_PATH);
+
+  let entries: string[];
+  try {
+    const res = await fetchImpl(manifestUrl);
+    if (!res.ok) return null;
+    const parsed = await res.json();
+    entries = Array.isArray(parsed) ? parsed.filter((e) => typeof e === 'string') : [];
+  } catch {
+    return null;
+  }
+
+  for (const entry of entries) {
+    if (!/\/vibecheck$/.test(entry)) continue;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const probe = await fetchImpl(entry, { signal: controller.signal as any });
+      clearTimeout(timer);
+      if (!probe.ok) continue;
+      const parsed = await probe.json();
+      if (parsed && parsed.ok === true && /vibecatch/.test(parsed.name || '')) {
+        return {
+          baseUrl: entry.replace(/\/vibecheck$/, ''),
+          version: parsed.version || '1.0.0',
+        };
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Resolve a video via a REMOTE relay's /resolve endpoint. NEVER throws.
+ * Returns a ResolvedAudio with source 'relay' and the relay baseUrl.
+ */
+export async function resolveViaRelay(
+  videoId: string,
+  baseUrl: string,
+  opts?: RelayResolveOpts
+): Promise<ResolvedAudio | null> {
+  const fetchImpl = opts?.fetchImpl ?? fetch;
+  const timeoutMs = opts?.timeoutMs ?? 1200;
+  const base = baseUrl.replace(/\/+$/, '');
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetchImpl(`${base}/resolve?videoId=${encodeURIComponent(videoId)}`, {
+      signal: controller.signal as any,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (json && json.audioUrl) {
+      return {
+        audioUrl: json.audioUrl,
+        title: json.title || '',
+        artist: json.artist || '',
+        duration: json.duration || 0,
+        source: 'relay',
+        port: 0,
+        baseUrl: base,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }

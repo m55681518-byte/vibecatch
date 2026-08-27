@@ -1,7 +1,7 @@
 import { PlatformType, Track, ExtractionResult, ResolutionMetadata, SponsoredItem } from '../types';
 import { raceYouTubeResolvers } from './resolvers';
-import { resolveViaLocalNode, buildLocalStreamUrl } from './localNode';
-import { buildLocalDownloadUrl } from './downloadUrl';
+import { resolveViaLocalNode, buildLocalStreamUrl, probeRelayManifest, resolveViaRelay, buildRelayStreamUrl } from './localNode';
+import { buildLocalDownloadUrl, buildRelayDownloadUrl } from './downloadUrl';
 
 // Curated library of high-fidelity royalty-free streams for studio matching & offline discovery
 export const CURATED_TRACKS: Track[] = [
@@ -617,6 +617,52 @@ async function extractYouTube3Tier(cleanUrl: string): Promise<ExtractionResult> 
     };
 
     return { success: true, track };
+  }
+
+  // No local node running? Try a REMOTE relay from the workers.json pool —
+  // zero-setup phone path (no Termux/Node install needed).
+  const relay = await probeRelayManifest();
+  if (relay) {
+    const relayHit = await resolveViaRelay(videoId, relay.baseUrl);
+    if (relayHit && relayHit.audioUrl) {
+      const finalTitle = relayHit.title || 'YouTube Audio';
+      const finalArtist = (relayHit.artist || 'YouTube Channel').replace(' - Topic', '');
+      const duration = relayHit.duration || 210;
+
+      const resolution: ResolutionMetadata = {
+        tier: 'tier1_studio',
+        tierLabel: 'Relay Pool: Remote Node Resolved This',
+        tierDescription: `Audio was resolved through a project relay — no local install required. Anything you download travels from the relay on your behalf.`,
+        sourceConfidence: 90,
+      };
+
+      const track: Track = {
+        id: `yt_${videoId}`,
+        title: finalTitle.slice(0, 100),
+        artist: finalArtist.slice(0, 60),
+        duration,
+        thumbnailUrl: maxResThumb || thumbnailUrl,
+        streamUrl: buildRelayStreamUrl(relay.baseUrl, relayHit.audioUrl),
+        downloadUrl: buildRelayDownloadUrl(relay.baseUrl, videoId, finalTitle, finalArtist),
+        platform: 'youtube',
+        originalUrl: cleanUrl,
+        addedAt: Date.now(),
+        playsCount: 850000,
+        isFavorite: false,
+        isOfflineAvailable: false,
+        audioFormat: 'm4a',
+        bitrate: '320kbps',
+        resolution,
+        lyrics: [
+          `🎵 ${finalTitle}`,
+          `👤 Channel / Artist: ${finalArtist}`,
+          `⚡ ${resolution.tierLabel}`,
+          `🎧 High-Definition In-Memory Audio`
+        ]
+      };
+
+      return { success: true, track };
+    }
   }
 
   // Fall back to public provider race
