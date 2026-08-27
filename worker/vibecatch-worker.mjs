@@ -239,9 +239,11 @@ export function startServer(port = 8795, opts = {}) {
         res.end(JSON.stringify({
           videoId: videoId,
           title: json.title || '',
+          artist: json.artist || json.uploader || json.author || '',
           duration: Math.round(json.duration || 0),
           thumbnail: json.thumbnail || '',
           uploader: json.uploader || json.author || '',
+          audioUrl: json.url || '',
         }));
       } catch {
         res.writeHead(502, corsHeaders());
