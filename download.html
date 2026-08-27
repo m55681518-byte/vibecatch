@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Downloading VibeCatch Source ZIP...</title>
+  <style>
+    body {
+      background: #0a0b10;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      text-align: center;
+    }
+    .card {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(0, 242, 254, 0.3);
+      padding: 2.5rem;
+      border-radius: 1.5rem;
+      box-shadow: 0 0 30px rgba(0, 242, 254, 0.2);
+      max-width: 450px;
+    }
+    .btn {
+      display: inline-block;
+      margin-top: 1.5rem;
+      padding: 0.9rem 2rem;
+      background: linear-gradient(135deg, #ff007f, #00f2fe);
+      color: #000;
+      font-weight: 800;
+      text-decoration: none;
+      border-radius: 1rem;
+      font-size: 1rem;
+      box-shadow: 0 0 20px rgba(255, 0, 127, 0.4);
+      transition: transform 0.2s;
+    }
+    .btn:hover {
+      transform: scale(1.05);
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1 style="font-size: 1.6rem; margin-bottom: 0.5rem; background: linear-gradient(to right, #ff007f, #00f2fe); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+      VibeCatch Full Source Code
+    </h1>
+    <p style="color: #94a3b8; font-size: 0.9rem; line-height: 1.5;">
+      Your download of <strong>vibecatch-project.zip</strong> (complete codebase, PWA assets, Web Audio engine, and configs) should start automatically.
+    </p>
+    <a id="dl-btn" href="/vibecatch-project.zip" download="vibecatch-project.zip" class="btn">
+      ⬇️ Click Here to Download ZIP
+    </a>
+  </div>
+  <script>
+    // Automatic download trigger
+    window.addEventListener('DOMContentLoaded', () => {
+      setTimeout(() => {
+        const link = document.createElement('a');
+        link.href = '/vibecatch-project.zip';
+        link.download = 'vibecatch-project.zip';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }, 300);
+    });
+  </script>
+</body>
+</html>

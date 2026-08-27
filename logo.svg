@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0b10" />
+      <stop offset="50%" stop-color="#151728" />
+      <stop offset="100%" stop-color="#090a12" />
+    </linearGradient>
+    <linearGradient id="neon-pink" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff007f" />
+      <stop offset="100%" stop-color="#db2777" />
+    </linearGradient>
+    <linearGradient id="neon-cyan" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00f2fe" />
+      <stop offset="100%" stop-color="#4facfe" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <filter id="strong-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="16" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Outer Rounded Container -->
+  <rect width="512" height="512" rx="112" fill="url(#bg-grad)" />
+  <rect width="506" height="506" x="3" y="3" rx="109" fill="none" stroke="url(#neon-pink)" stroke-width="3" stroke-opacity="0.4" />
+
+  <!-- Background Ambient Glow Rings -->
+  <circle cx="256" cy="256" r="180" fill="none" stroke="#00f2fe" stroke-width="1.5" stroke-opacity="0.15" stroke-dasharray="8 6" />
+  <circle cx="256" cy="256" r="140" fill="none" stroke="#ff007f" stroke-width="1.5" stroke-opacity="0.2" />
+
+  <!-- 3D Vinyl Grooves Background -->
+  <circle cx="256" cy="256" r="110" fill="#0f111a" stroke="#1f2337" stroke-width="2" />
+  <circle cx="256" cy="256" r="85" fill="none" stroke="#2a2e45" stroke-width="1" stroke-opacity="0.6" />
+  <circle cx="256" cy="256" r="65" fill="none" stroke="#373d5a" stroke-width="1" stroke-opacity="0.6" />
+
+  <!-- Center Glow Orb -->
+  <circle cx="256" cy="256" r="48" fill="url(#neon-pink)" filter="url(#glow)" opacity="0.3" />
+  <circle cx="256" cy="256" r="32" fill="#121420" stroke="url(#neon-cyan)" stroke-width="2" />
+
+  <!-- Dynamic Music / Waveform Note Icon -->
+  <g filter="url(#glow)">
+    <!-- Cyan Wave / Note Component -->
+    <path d="M 230 150 C 230 140, 245 135, 275 130 C 310 125, 335 120, 340 145 L 340 270 C 340 295, 305 315, 280 305 C 255 295, 260 265, 290 260 C 305 258, 320 262, 320 250 L 320 180 L 250 192 L 250 300 C 250 325, 215 345, 190 335 C 165 325, 170 295, 200 290 C 215 288, 230 292, 230 280 Z" fill="url(#neon-cyan)" />
+    
+    <!-- Pink TikTok / YT Pulse Accent -->
+    <path d="M 235 145 C 235 137, 248 132, 278 127 C 313 122, 338 117, 343 142 L 343 245 C 330 235, 310 238, 298 245 L 298 175 L 245 186 L 245 280 C 240 270, 220 273, 208 280 Z" fill="url(#neon-pink)" opacity="0.85" />
+  </g>
+
+  <!-- Catch Arrow / Audio Ripple Lines -->
+  <g stroke="url(#neon-cyan)" stroke-width="5" stroke-linecap="round" filter="url(#glow)">
+    <path d="M 120 256 A 136 136 0 0 1 150 160" opacity="0.8" />
+    <path d="M 392 256 A 136 136 0 0 0 362 160" opacity="0.8" />
+    <path d="M 100 256 A 156 156 0 0 1 140 140" opacity="0.4" />
+    <path d="M 412 256 A 156 156 0 0 0 372 140" opacity="0.4" />
+  </g>
+
+  <!-- Frequency Equalizer Bars at bottom -->
+  <g fill="url(#neon-pink)" opacity="0.9">
+    <rect x="180" y="375" width="8" height="30" rx="4" />
+    <rect x="198" y="360" width="8" height="45" rx="4" fill="url(#neon-cyan)" />
+    <rect x="216" y="350" width="8" height="55" rx="4" />
+    <rect x="234" y="340" width="8" height="65" rx="4" fill="url(#neon-cyan)" />
+    <rect x="252" y="330" width="8" height="75" rx="4" />
+    <rect x="270" y="340" width="8" height="65" rx="4" fill="url(#neon-cyan)" />
+    <rect x="288" y="350" width="8" height="55" rx="4" />
+    <rect x="306" y="360" width="8" height="45" rx="4" fill="url(#neon-cyan)" />
+    <rect x="324" y="375" width="8" height="30" rx="4" />
+  </g>
+</svg>
