@@ -1,5 +1,32 @@
 # VibeCatch Remote Worker — Contract + Setup
 
+## Cloudflare thin signer (`worker/cf-signer-*.mjs`) — LIVE
+- **Live endpoint:** `https://vibecatch-signer.pages.dev` (Pages Advanced-Mode worker; a
+  Cloudflare Pages-scoped API token, not a Workers token, is what this account holds).
+- **Contract (mirrors the signer provider used by the PWA):**
+  - `GET /vibecheck` → `{ok:true,name:'vibecatch-cf-signer',version:'1.0.0'}`
+  - `GET /resolve?videoId=<id>` → `{ok:true,videoId,audioUrl,title,artist,duration}` where
+    `audioUrl` is a **raw signed googlevideo URL** (thin signer) — bytes stream straight from
+    the CDN to the device via plain `<audio>` (no CORS), never through this worker.
+  - `OPTIONS` → 204 + `Access-Control-Allow-Origin: *`; invalid id → 400; all clients failed →
+    502; other methods/paths → 405/404.
+- **Playback proof:** the minted URL is IP-pinned to Cloudflare's egress at mint time, but
+  googlevideo re-signs for the requesting device via a standard CDN 302 chain (`ipbypass=yes&mip=…`)
+  at fetch time — so `/resolve` works from any device/IP (verified live 2026-08-27, journal 068).
+- **In the PWA:** the signer is provider #1 in `src/services/resolvers.ts` (kind `signer`,
+  `raceYouTubeResolvers`). It races against cobalt/piped/invidious and usually wins on speed
+  (~800ms); if it is down the race falls through to the other providers.
+- **Rebuild + redeploy** (Pages-scoped token):
+  ```
+  # 1. rebuild the self-contained Pages bundle (concatenates core+worker, strips the core import)
+  node scripts\build-signer-pages-bundle.mjs   # -> _worker.js in <repo>/deploy/signer/
+  # 2. deploy (wrangler installed at C:\Users\Mike-\Documents\vibecatch-tools\wrangler)
+  set CLOUDFLARE_API_TOKEN=<token from "ACCOUNT ID AND CLOUDFLAIRE TOKEN.txt">
+  set CLOUDFLARE_ACCOUNT_ID=66a463623b9929ea2e1eb3a700291e08
+  wrangler pages deploy <repo>\deploy\signer --project-name=vibecatch-signer --branch=main
+  ```
+  (Source-of-truth bundle build lives in `scripts\build-signer-pages-bundle.mjs`, added journal 068.)
+
 ## HTTP contract (mirrors local node)
 - `GET /vibecheck` → `{ok:true,name:'vibecatch-remote-worker',version:'1.0.0'}`
 - `GET /resolve?videoId=<id>` → metadata JSON via yt-dlp --dump-json; bot-wall bypassed by a minimal Netscape cookie stub (auto-created at `<os.tmpdir>/vibecatch-worker/cookies.txt` if none provided). Set `VIBECATCH_YT_COOKIES=<path>` env var to override.
