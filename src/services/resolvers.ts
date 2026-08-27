@@ -7,7 +7,7 @@
 
 interface ProviderDescriptor {
   name: string;
-  kind: 'cobalt' | 'piped' | 'invidious';
+  kind: 'cobalt' | 'piped' | 'invidious' | 'signer';
   method: 'GET' | 'POST';
   endpoint: string;
 }
@@ -31,6 +31,14 @@ interface RaceOpts {
 // ---------------------------------------------------------------------------
 
 export const PROVIDERS_YT: ProviderDescriptor[] = [
+  // Cloudflare thin signer (Turn B) — mints a raw signed googlevideo URL as
+  // tiny JSON; audio bytes stream direct to the device (direct-to-device path).
+  {
+    name: 'signer-cloudflare',
+    kind: 'signer',
+    method: 'GET',
+    endpoint: 'https://vibecatch-signer.pages.dev/resolve?videoId={id}',
+  },
   // Cobalt public instances (POST)
   {
     name: 'cobalt-official',
@@ -160,6 +168,22 @@ export function normalizeInvidiousAdaptive(
   };
 }
 
+/** Normalize a Cloudflare thin-signer /resolve response ({ok,videoId,audioUrl,...}). */
+export function normalizeSignerResponse(
+  json: Record<string, any>,
+): ResolvedAudio | null {
+  if (!json || json.ok !== true || typeof json.audioUrl !== 'string' || json.audioUrl.length === 0) {
+    return null;
+  }
+  return {
+    audioUrl: json.audioUrl,
+    title: json.title || '',
+    artist: json.artist || '',
+    duration: typeof json.duration === 'number' ? json.duration : undefined,
+    source: 'signer',
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Provider Fetcher Factory
 // ---------------------------------------------------------------------------
@@ -212,7 +236,8 @@ function createProviderPromise(
         let normalized: ResolvedAudio | null = null;
         normalized = normalizeCobaltAudio(json)
           ?? normalizePipedStreams(json)
-          ?? normalizeInvidiousAdaptive(json);
+          ?? normalizeInvidiousAdaptive(json)
+          ?? normalizeSignerResponse(json);
 
         if (settled) return;
         settled = true;

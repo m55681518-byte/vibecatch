@@ -671,6 +671,7 @@ async function extractYouTube3Tier(cleanUrl: string): Promise<ExtractionResult> 
   if (resolved) {
     const kind = resolved.source.startsWith('cobalt') ? 'cobalt'
       : resolved.source.startsWith('piped') ? 'piped'
+      : resolved.source.startsWith('signer') ? 'signer'
       : 'invidious';
 
     const finalTitle = resolved.title || 'YouTube Audio';
@@ -692,6 +693,13 @@ async function extractYouTube3Tier(cleanUrl: string): Promise<ExtractionResult> 
         tierLabel: 'Tier 2: Caption NLP Match',
         tierDescription: `Audio streams resolved via ${resolved.source} (Piped).`,
         sourceConfidence: 90,
+      };
+    } else if (kind === 'signer') {
+      resolution = {
+        tier: 'tier1_studio',
+        tierLabel: 'Cloudflare Signer: Direct-to-Device',
+        tierDescription: `Audio minted via ${resolved.source} (Cloudflare thin signer). Bytes stream straight from the CDN to your device.`,
+        sourceConfidence: 97,
       };
     } else {
       resolution = {
