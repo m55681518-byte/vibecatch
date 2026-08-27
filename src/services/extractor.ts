@@ -1,6 +1,6 @@
 import { PlatformType, Track, ExtractionResult, ResolutionMetadata, SponsoredItem } from '../types';
 import { raceYouTubeResolvers } from './resolvers';
-import { resolveViaLocalNode, buildLocalStreamUrl, probeRelayManifest, resolveViaRelay, buildRelayStreamUrl } from './localNode';
+import { resolveViaLocalNode, buildLocalStreamUrl, probeRelayManifest, resolveViaRelay } from './localNode';
 import { buildLocalDownloadUrl, buildRelayDownloadUrl } from './downloadUrl';
 
 // Curated library of high-fidelity royalty-free streams for studio matching & offline discovery
@@ -642,7 +642,7 @@ async function extractYouTube3Tier(cleanUrl: string): Promise<ExtractionResult> 
         artist: finalArtist.slice(0, 60),
         duration,
         thumbnailUrl: maxResThumb || thumbnailUrl,
-        streamUrl: buildRelayStreamUrl(relay.baseUrl, relayHit.audioUrl),
+        streamUrl: relayHit.audioUrl,
         downloadUrl: buildRelayDownloadUrl(relay.baseUrl, videoId, finalTitle, finalArtist),
         platform: 'youtube',
         originalUrl: cleanUrl,
