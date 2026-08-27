@@ -42,7 +42,7 @@ before(async () => {
     'const args=process.argv.slice(2);' +
     'fs.appendFileSync(process.env.VIBECATCH_WORKER_COUNTER,"1\\n");' +
     'fs.appendFileSync(process.env.VIBECATCH_WORKER_ARGS,JSON.stringify(args)+"\\n");' +
-    'if(args.some(a=>a==="--dump-json")){process.stdout.write(JSON.stringify({id:"w1",title:"Test Song",duration:180,thumbnail:"https://x/t.jpg"}));}' +
+    'if(args.some(a=>a==="--dump-json")){process.stdout.write(JSON.stringify({id:"w1",title:"Test Song",duration:180,thumbnail:"https://x/t.jpg",url:"https://googlevideo.example/audio?expire=1",artist:"Test Artist"}));}' +
     'else{process.stdout.write(Buffer.from("AUDIOBYTES0123456789"));}\n'
   );
   const fakeBin = process.platform === 'win32' ? path.join(tmpDir, 'fake.cmd') : path.join(tmpDir, 'fake.sh');
@@ -83,6 +83,8 @@ describe('R2 /resolve returns honest metadata via yt-dlp --dump-json', () => {
     assert.equal(j.title, 'Test Song');
     assert.equal(j.duration, 180);
     assert.ok(j.videoId === undefined || j.videoId === 'w1vid');
+    assert.equal(j.audioUrl, 'https://googlevideo.example/audio?expire=1', 'audioUrl must mirror yt-dlp url so the PWA relay resolver accepts this worker');
+    assert.equal(j.artist, 'Test Artist', 'artist should be surfaced for the PWA track');
   });
   test('yt-dlp failure -> honest 502 JSON, never fabricated data', async () => {
     const r = await get('/resolve?videoId=FAILME');
