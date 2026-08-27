@@ -315,14 +315,25 @@ export function startServer(port = 8795, opts = {}) {
       let headersSent = false;
       let bytesSent = false;
 
+      // Proxy/tunnel TTFB deadline (mirror of the local node): see test/ttfb-headers
+      const HEADER_DEADLINE_MS = 2000;
+      const headerDeadline = setTimeout(() => {
+        if (!headersSent && !res.headersSent && !res.writableEnded && !res.destroyed) {
+          headersSent = true;
+          res.writeHead(200, audioHeaders);
+          res.flushHeaders();
+        }
+      }, HEADER_DEADLINE_MS);
+
       child.stdout.on('data', (chunk) => {
-        if (!headersSent) { headersSent = true; res.writeHead(200, audioHeaders); }
+        if (!headersSent) { headersSent = true; clearTimeout(headerDeadline); res.writeHead(200, audioHeaders); }
         bytesSent = true;
         res.write(chunk);
         try { ws.write(chunk); } catch {}
       });
 
       child.on('close', (code) => {
+        clearTimeout(headerDeadline);
         ws.end(() => {
           let out = null;
           if (code === 0 && bytesSent) {
@@ -335,6 +346,7 @@ export function startServer(port = 8795, opts = {}) {
         });
         if (!bytesSent) {
           if (res.writableEnded || res.destroyed) return;
+          if (res.headersSent) { try { res.end(); } catch {} return; }
           const stderrTail = Buffer.concat(stderrChunks).toString('utf8').slice(-200).trim();
           res.writeHead(502, corsHeaders());
           res.end(JSON.stringify({ error: 'yt-dlp exited with code ' + code + (stderrTail ? ': ' + stderrTail : '') }));
@@ -344,6 +356,7 @@ export function startServer(port = 8795, opts = {}) {
       });
 
       child.on('error', (e) => {
+        clearTimeout(headerDeadline);
         try { ws.end(); } catch {}
         try { fs.unlinkSync(partP); } catch {}
         inflight.delete(videoId);
