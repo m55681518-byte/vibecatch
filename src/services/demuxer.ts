@@ -209,7 +209,9 @@ export async function trimAudioSegment(
   startTime: number,
   endTime: number
 ): Promise<{ blob: Blob; url: string; filename: string }> {
-  const streamUrl = await getPlayableAudioUrl(track);
+  // Trimmer fetches the full file via browser fetch(), so it needs the CORS-safe
+  // relay download endpoint — never a raw direct googlevideo URL (no ACAO headers).
+  const streamUrl = pickDownloadUrl(track);
   const response = await fetch(streamUrl);
   const arrayBuffer = await response.arrayBuffer();
 

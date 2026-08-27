@@ -1,5 +1,6 @@
 import { Track, EqualizerBand, EqualizerPreset } from '../types';
 import { getPlayableAudioUrl } from './demuxer';
+import { isDirectStreamUrl, playbackChain } from './downloadUrl';
 
 export const EQUALIZER_FREQUENCIES = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
@@ -33,6 +34,8 @@ class AudioEngine {
   private isInitialized = false;
 
   private currentTrack: Track | null = null;
+  private currentResolvedUrl = '';
+  private fallbackUsed = false;
   private listeners: AudioEngineListeners = {};
   private currentPresetId = 'flat';
   private bassBoostGain = 0;
@@ -69,6 +72,7 @@ class AudioEngine {
     this.audio.addEventListener('error', (e) => {
       console.warn('Audio element error:', e);
       this.listeners.onError?.(e);
+      this.retryNextPlaybackSource();
     });
   }
 
@@ -159,6 +163,12 @@ class AudioEngine {
 
     this.currentTrack = track;
     const resolvedUrl = await getPlayableAudioUrl(track);
+    this.currentResolvedUrl = resolvedUrl;
+    this.fallbackUsed = false;
+
+    // Direct googlevideo streams send no ACAO headers; forcing 'anonymous'
+    // would block plain media playback. Plain <audio> needs no CORS at all.
+    this.audio.crossOrigin = isDirectStreamUrl(resolvedUrl) ? null : 'anonymous';
 
     this.audio.src = resolvedUrl;
     this.audio.currentTime = startTime;
@@ -171,6 +181,32 @@ class AudioEngine {
     } catch (err) {
       console.warn('Auto-play blocked or failed:', err);
     }
+  }
+
+  /** One-shot fallback: on media error, move to the next source in the
+   *  playback chain (e.g. relay download) instead of silently dying. */
+  private retryNextPlaybackSource() {
+    const track = this.currentTrack;
+    if (!track || this.fallbackUsed) return;
+    this.fallbackUsed = true;
+
+    const src = this.currentResolvedUrl;
+    const chain = playbackChain(track, null);
+    const idx = chain.indexOf(src);
+    if (idx === -1) {
+      this.loadNextSource(chain[0]);
+      return;
+    }
+    this.loadNextSource(chain[idx + 1]);
+  }
+
+  private loadNextSource(nextUrl?: string) {
+    if (!nextUrl) return;
+    this.currentResolvedUrl = nextUrl;
+    this.audio.crossOrigin = isDirectStreamUrl(nextUrl) ? null : 'anonymous';
+    this.audio.src = nextUrl;
+    this.audio.currentTime = 0;
+    this.audio.play().catch((err) => console.warn('Fallback replay failed:', err));
   }
 
   public async togglePlay(): Promise<boolean> {

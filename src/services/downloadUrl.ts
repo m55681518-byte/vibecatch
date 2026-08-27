@@ -18,12 +18,48 @@ export function pickDownloadUrl(track: DownloadSource): string {
 }
 
 /**
- * Playback source: cached blob > local-node full file (instant via node disk
- * cache, seekable) > capped preview relay. Never the capped relay when a
- * full-file endpoint exists.
+ * True when the streamUrl is a DIRECT host (googlevideo CDN) that can stream
+ * straight to the device via a plain <audio> element with no CORS headers.
+ * False for relay-wrapped URLs (localhost node, *.trycloudflare.com tunnel)
+ * which go through HTTPS relay for playback.
+ */
+export function isDirectStreamUrl(url: string): boolean {
+  if (typeof url !== 'string' || !url) return false;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') return false;
+    if (host === 'trycloudflare.com' || host.endsWith('.trycloudflare.com')) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Playback source: cached blob > DIRECT minted streamUrl (thin-signer / direct
+ * to-device playback) > local-node full file > relay download. For legacy
+ * relay-wrapped streamUrls (not direct), keep download > stream ordering.
  */
 export function playbackSourceFor(track: DownloadSource, blobUrl?: string | null): string {
-  return blobUrl || track.downloadUrl || track.streamUrl;
+  if (blobUrl) return blobUrl;
+  if (isDirectStreamUrl(track.streamUrl)) return track.streamUrl;
+  return track.downloadUrl || track.streamUrl;
+}
+
+/**
+ * Ordered, deduped list of fallback playback sources for a track:
+ * blob (if given), then the primary playbackSourceFor pick, then the
+ * remaining candidate URLs in streamUrl/downloadUrl order.
+ */
+export function playbackChain(track: DownloadSource, blobUrl?: string | null): string[] {
+  const chain: string[] = [];
+  if (blobUrl) chain.push(blobUrl);
+  const primary = playbackSourceFor(track, null);
+  if (primary) chain.push(primary);
+  for (const candidate of [track.downloadUrl, track.streamUrl]) {
+    if (candidate && !chain.includes(candidate)) chain.push(candidate);
+  }
+  return chain;
 }
 
 /**
