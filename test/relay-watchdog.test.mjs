@@ -129,3 +129,21 @@ describe('W6 hostname/URL validators (avoid corrupting pool)', () => {
     assert.equal(mod.validRelayUrl('https://'), false);
   });
 });
+
+describe('W7 git invocations always carry alliance identity (fresh clones have no config)', () => {
+  test('gitCommand prefixes -c user.name/email on commit paths', async () => {
+    const mod = await import(url.pathToFileURL(wdPath).href);
+    const args = mod.gitCommand('C:\\repo', ['commit', '-m', 'watchdog: pool update']);
+    assert.ok(args.includes('-c'), 'must pass identity via -c flags');
+    const i = args.indexOf('user.name=alliance');
+    assert.notEqual(i, -1, 'user.name=alliance missing: ' + JSON.stringify(args));
+    assert.ok(args.includes('user.email=alliance@users.noreply.github.com'));
+    assert.ok(args.includes('commit'));
+  });
+  test('every gitCommand positional keeps repoDir as -C target', async () => {
+    const mod = await import(url.pathToFileURL(wdPath).href);
+    const args = mod.gitCommand('C:\\deploy-clone', ['add', '-A']);
+    assert.equal(args[0], '-C');
+    assert.equal(args[1], 'C:\\deploy-clone');
+  });
+});
