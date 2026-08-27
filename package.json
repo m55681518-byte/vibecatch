@@ -10,6 +10,10 @@
     "test": "node --test"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/ios": "^8.5.0",
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
     "idb": "^8.0.2",

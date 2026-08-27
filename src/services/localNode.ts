@@ -10,6 +10,52 @@ export const DEFAULT_PORTS = [8794, 8795];
 // phones a zero-setup download path when no local node is running.
 export const RELAY_MANIFEST_PATH = '/workers.json';
 
+export interface ManifestUrlLike {
+  origin?: string;
+  href?: string;
+}
+
+export interface ManifestUrlOpts {
+  location?: ManifestUrlLike;
+  envBase?: string;
+}
+
+function baseUrlFromEnv(): string {
+  try {
+    if (
+      typeof import.meta !== 'undefined' &&
+      (import.meta as any).env &&
+      typeof (import.meta as any).env.BASE_URL === 'string'
+    ) {
+      return (import.meta as any).env.BASE_URL;
+    }
+  } catch {
+    // fall through to '/'
+  }
+  return '/';
+}
+
+/**
+ * Resolve the relay manifest URL (public/workers.json) in a base-aware way.
+ * GitHub Pages serves the SPA under a subpath (BASE_URL './') and Capacitor uses a
+ * custom scheme ('capacitor://localhost'), so a hard-coded absolute '/workers.json'
+ * would break both. With BASE_URL '/', behaviour is unchanged (origin + path).
+ * Pure/exported so tests can drive location + envBase directly. NEVER throws.
+ */
+export function resolveRelayManifestUrl(opts?: ManifestUrlOpts): string {
+  const envBase = opts?.envBase ?? baseUrlFromEnv();
+  const loc =
+    opts?.location ??
+    (typeof location !== 'undefined' && location ? location : undefined);
+  if (loc && loc.origin) {
+    const origin = String(loc.origin);
+    const href = String(loc.href || '');
+    const dirBase = href ? new URL('.', href).href : origin + '/';
+    return new URL(envBase + 'workers.json', dirBase).href;
+  }
+  return RELAY_MANIFEST_PATH;
+}
+
 interface ProbeOpts {
   fetchImpl?: typeof fetch;
   ports?: number[];
@@ -206,10 +252,7 @@ export async function probeRelayManifest(opts?: RelayProbeOpts): Promise<RelayIn
   const fetchImpl = opts?.fetchImpl ?? fetch;
   const timeoutMs = opts?.timeoutMs ?? 1200;
   const manifestUrl =
-    opts?.manifestUrl ??
-    (typeof location !== 'undefined' && location && location.origin
-      ? location.origin + RELAY_MANIFEST_PATH
-      : RELAY_MANIFEST_PATH);
+    opts?.manifestUrl ?? resolveRelayManifestUrl();
 
   let entries: string[];
   try {

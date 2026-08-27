@@ -23,3 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 .freebuff/ 
+
+# Capacitor generated copies of the web build (regenerated via npx cap sync)
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json 
