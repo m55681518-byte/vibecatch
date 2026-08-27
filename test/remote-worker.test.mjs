@@ -136,7 +136,10 @@ describe('R5 workers.json manifest exists for the client pool', () => {
     assert.ok(fs.existsSync(p), 'public/workers.json missing');
     const arr = JSON.parse(fs.readFileSync(p, 'utf8'));
     assert.ok(Array.isArray(arr), 'must be an array');
+    assert.ok(arr.length >= 2, 'pool must hold at least 2 relays for failover, got ' + arr.length);
     for (const u of arr) assert.match(u, /^https:\/\/[a-z0-9.-]+/i, 'each entry must be an https URL: ' + u);
+    const hosts = new Set(arr.map((u) => new URL(u).host));
+    assert.equal(hosts.size, arr.length, 'pool entries must be distinct hosts to avoid single-tunnel death');
   });
 });
 
