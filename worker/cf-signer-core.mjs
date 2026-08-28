@@ -126,9 +126,10 @@ function parseInnerTubeSearch(json) {
   return out;
 }
 
-function rankCandidates(candidates, originalVideoId, originalDurationSec) {
+function rankCandidates(candidates, originalVideoId, originalDurationSec, artistName) {
   if (!candidates || !Array.isArray(candidates)) return [];
   const od = Number(originalDurationSec) || 0;
+  const artist = artistName ? String(artistName).trim().toLowerCase() : '';
   return candidates
     .filter((c) => c && c.videoId && c.videoId !== originalVideoId)
     .filter((c) => {
@@ -141,6 +142,11 @@ function rankCandidates(candidates, originalVideoId, originalDurationSec) {
       if (/lyric/i.test(c.title || '')) score += 200;
       if (/official\s*(audio|video)?/i.test(c.title || '')) score += 150;
       if (/audio/i.test(c.title || '')) score += 120;
+      if (artist) {
+        const ch = String(c.channel || '').trim().toLowerCase();
+        const ti = String(c.title || '').trim().toLowerCase();
+        if (ch.includes(artist) || ti.includes(artist)) score += 400;
+      }
       const cd = Number(c.durationSec) || 0;
       if (od > 0 && cd > 0) score -= Math.min(Math.abs(cd - od), 600) / 2;
       return Object.assign({}, c, { score });
@@ -165,6 +171,40 @@ export function fetchWatchTitle(videoId, opts = {}) {
       return null;
     }
   })();
+}
+
+// OR1/OR2 — title fallback that survives Cloudflare egress. The watch HTML is
+// BotGuard-wrapped from datacenter IPs (no parseable <title>), but the oEmbed
+// endpoint is not gated: returns {title, author_name} even from CF egress.
+export async function fetchOembedInfo(videoId, opts = {}) {
+  const fetchImpl = opts.fetchImpl || fetch;
+  const timeoutMs = opts.timeoutMs ?? 10000;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const onOuterAbort = () => controller.abort();
+    if (opts.signal) {
+      if (opts.signal.aborted) controller.abort();
+      else opts.signal.addEventListener('abort', onOuterAbort, { once: true });
+    }
+    try {
+      const url = `https://www.youtube.com/oembed?url=${encodeURIComponent('https://www.youtube.com/watch?v=' + videoId)}&format=json`;
+      const res = await fetchImpl(url, { signal: controller.signal });
+      if (!res.ok || typeof res.json !== 'function') return null;
+      const json = await res.json();
+      if (!json) return null;
+      let title = typeof json.title === 'string' ? json.title.replace(/\s+/g, ' ').trim() : '';
+      title = title.replace(/\s*-\s*YouTube\s*$/, '').replace(/\s*-\s*Topic\s*$/, '').trim();
+      if (!title || /^YouTube$/i.test(title)) return null;
+      const artist = typeof json.author_name === 'string' ? json.author_name.replace(/\s*-\s*Topic\s*$/i, '').trim() : '';
+      return { title, artist };
+    } finally {
+      clearTimeout(timer);
+      if (opts.signal) opts.signal.removeEventListener('abort', onOuterAbort);
+    }
+  } catch {
+    return null;
+  }
 }
 
 export async function searchStandardDouble(query, opts = {}) {
@@ -196,8 +236,8 @@ export async function searchStandardDouble(query, opts = {}) {
   }
 }
 
-export function pickDoubleCandidate(candidates, originalVideoId, originalDurationSec) {
-  const ranked = rankCandidates(candidates, originalVideoId, originalDurationSec);
+export function pickDoubleCandidate(candidates, originalVideoId, originalDurationSec, artistName) {
+  const ranked = rankCandidates(candidates, originalVideoId, originalDurationSec, artistName);
   return ranked.length > 0 ? ranked[0] : null;
 }
 
@@ -207,13 +247,21 @@ export async function extractWithDoublePivot(videoId, opts = {}) {
     if (primary) return primary;
   }
   try {
-    const title = await fetchWatchTitle(videoId, opts);
+    let title = await fetchWatchTitle(videoId, opts);
+    let artist = '';
+    if (!title) {
+      const info = await fetchOembedInfo(videoId, opts);
+      if (info) {
+        title = info.title;
+        artist = info.artist;
+      }
+    }
     if (!title) return null;
     let candidates = await searchStandardDouble(`${title} official audio`, opts);
     if (candidates.length === 0) {
       candidates = await searchStandardDouble(`${title} lyric`, opts);
     }
-    const ordered = rankCandidates(candidates, videoId, opts.originalDurationSec || 0);
+    const ordered = rankCandidates(candidates, videoId, opts.originalDurationSec || 0, artist);
     for (const cand of ordered) {
       const minted = await mintSignedUrl(cand.videoId, opts);
       if (minted) {
