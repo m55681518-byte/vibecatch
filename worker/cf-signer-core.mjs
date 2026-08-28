@@ -242,31 +242,37 @@ export function pickDoubleCandidate(candidates, originalVideoId, originalDuratio
 }
 
 export async function extractWithDoublePivot(videoId, opts = {}) {
+  const budgetMs = Math.max(400, Math.floor(Number(opts.timeoutMs) || 15000));
+  const deadline = Date.now() + budgetMs;
+  const left = () => Math.max(200, deadline - Date.now());
   if (!opts.prioritizeDouble) {
-    const primary = await mintSignedUrl(videoId, opts);
+    const primary = await mintSignedUrl(videoId, { ...opts, timeoutMs: left() });
     if (primary) return primary;
   }
   try {
-    let title = await fetchWatchTitle(videoId, opts);
+    let title = '';
     let artist = '';
+    const info = await fetchOembedInfo(videoId, { ...opts, timeoutMs: left() });
+    if (info) {
+      title = info.title;
+      artist = info.artist;
+    }
     if (!title) {
-      const info = await fetchOembedInfo(videoId, opts);
-      if (info) {
-        title = info.title;
-        artist = info.artist;
-      }
+      title = await fetchWatchTitle(videoId, opts);
     }
     if (!title) return null;
-    let candidates = await searchStandardDouble(`${title} official audio`, opts);
+    let candidates = await searchStandardDouble(`${title} official audio`, { ...opts, timeoutMs: left() });
     if (candidates.length === 0) {
-      candidates = await searchStandardDouble(`${title} lyric`, opts);
+      candidates = await searchStandardDouble(`${title} lyric`, { ...opts, timeoutMs: left() });
     }
     const ordered = rankCandidates(candidates, videoId, opts.originalDurationSec || 0, artist);
     for (const cand of ordered) {
-      const minted = await mintSignedUrl(cand.videoId, opts);
+      if (Date.now() >= deadline) break;
+      const minted = await mintSignedUrl(cand.videoId, { ...opts, timeoutMs: left() });
       if (minted) {
         return {
           ...minted,
+          artist: artist || minted.artist,
           doubled: true,
           originalVideoId: videoId,
           viaVideoId: cand.videoId,
