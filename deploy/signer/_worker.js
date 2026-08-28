@@ -82,6 +82,214 @@ export const PICK_CLIENTS = [
 ];
 
 // ---------------------------------------------------------------------------
+// Audio-Double Pivot (strict YT-Music/-Topic IDs rescue)
+// Primary innerTube mint blocked from datacenter egress -> scrape the watch
+// <title> (never blocked) -> InnerTube WEB search "<song> official audio" /
+// "lyric" -> rank standard (non-Topic) candidates -> mint the best one.
+// Returns the signed googlevideo URL of the unblocked standard upload.
+// ---------------------------------------------------------------------------
+
+export const WEB_SEARCH_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
+export const WEB_SEARCH_ENDPOINT = 'https://www.youtube.com/youtubei/v1/search';
+
+function parseLengthText(raw) {
+  if (typeof raw !== 'string' || !/^\d+:\d{2}(:\d{2})?$/.test(raw.trim())) return 0;
+  const parts = raw.trim().split(':').map(Number);
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return parts[0] * 60 + parts[1];
+}
+
+function parseInnerTubeSearch(json) {
+  const out = [];
+  if (!json || !json.contents) return out;
+  const two = json.contents.twoColumnSearchResultsRenderer;
+  if (!two || !two.primaryContents) return out;
+  const sections = (two.primaryContents.sectionListRenderer && two.primaryContents.sectionListRenderer.contents) || [];
+  for (const section of sections) {
+    const items = (section.itemSectionRenderer && section.itemSectionRenderer.contents) || [];
+    for (const item of items) {
+      const vr = item.videoRenderer;
+      if (!vr || !vr.videoId) continue;
+      const title =
+        (vr.title && vr.title.runs && vr.title.runs[0] && vr.title.runs[0].text) ||
+        (vr.title && vr.title.simpleText) ||
+        '';
+      if (!title) continue;
+      const channel =
+        (vr.ownerText && vr.ownerText.runs && vr.ownerText.runs[0] && vr.ownerText.runs[0].text) ||
+        (vr.ownerText && vr.ownerText.simpleText) ||
+        '';
+      out.push({
+        videoId: vr.videoId,
+        title,
+        channel,
+        durationSec: parseLengthText((vr.lengthText && vr.lengthText.simpleText) || ''),
+      });
+    }
+  }
+  return out;
+}
+
+function rankCandidates(candidates, originalVideoId, originalDurationSec, artistName) {
+  if (!candidates || !Array.isArray(candidates)) return [];
+  const od = Number(originalDurationSec) || 0;
+  const artist = artistName ? String(artistName).trim().toLowerCase() : '';
+  return candidates
+    .filter((c) => c && c.videoId && c.videoId !== originalVideoId)
+    .filter((c) => {
+      const ch = String(c.channel || '').trim().toLowerCase();
+      const ti = String(c.title || '').trim().toLowerCase();
+      return !/topic\s*$/.test(ch) && !/topic\s*$/.test(ti);
+    })
+    .map((c) => {
+      let score = 0;
+      if (/lyric/i.test(c.title || '')) score += 200;
+      if (/official\s*(audio|video)?/i.test(c.title || '')) score += 150;
+      if (/audio/i.test(c.title || '')) score += 120;
+      if (artist) {
+        const ch = String(c.channel || '').trim().toLowerCase();
+        const ti = String(c.title || '').trim().toLowerCase();
+        if (ch.includes(artist) || ti.includes(artist)) score += 400;
+      }
+      const cd = Number(c.durationSec) || 0;
+      if (od > 0 && cd > 0) score -= Math.min(Math.abs(cd - od), 600) / 2;
+      return Object.assign({}, c, { score });
+    })
+    .sort((a, b) => (b.score || 0) - (a.score || 0) || String(a.videoId).localeCompare(String(b.videoId)));
+}
+
+export function fetchWatchTitle(videoId, opts = {}) {
+  const fetchImpl = opts.fetchImpl || fetch;
+  return (async () => {
+    try {
+      const res = await fetchImpl(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`, {});
+      if (!res.ok || typeof res.text !== 'function') return null;
+      const html = await res.text();
+      const m = html.match(/<title>(.*?)<\/title>/i);
+      if (!m) return null;
+      let title = m[1].replace(/\s+/g, ' ').trim();
+      title = title.replace(/\s*-\s*YouTube\s*$/, '').replace(/\s*-\s*Topic\s*$/, '').trim();
+      if (!title || /^YouTube$/i.test(title)) return null;
+      return title;
+    } catch {
+      return null;
+    }
+  })();
+}
+
+// OR1/OR2 — title fallback that survives Cloudflare egress. The watch HTML is
+// BotGuard-wrapped from datacenter IPs (no parseable <title>), but the oEmbed
+// endpoint is not gated: returns {title, author_name} even from CF egress.
+export async function fetchOembedInfo(videoId, opts = {}) {
+  const fetchImpl = opts.fetchImpl || fetch;
+  const timeoutMs = opts.timeoutMs ?? 10000;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const onOuterAbort = () => controller.abort();
+    if (opts.signal) {
+      if (opts.signal.aborted) controller.abort();
+      else opts.signal.addEventListener('abort', onOuterAbort, { once: true });
+    }
+    try {
+      const url = `https://www.youtube.com/oembed?url=${encodeURIComponent('https://www.youtube.com/watch?v=' + videoId)}&format=json`;
+      const res = await fetchImpl(url, { signal: controller.signal });
+      if (!res.ok || typeof res.json !== 'function') return null;
+      const json = await res.json();
+      if (!json) return null;
+      let title = typeof json.title === 'string' ? json.title.replace(/\s+/g, ' ').trim() : '';
+      title = title.replace(/\s*-\s*YouTube\s*$/, '').replace(/\s*-\s*Topic\s*$/, '').trim();
+      if (!title || /^YouTube$/i.test(title)) return null;
+      const artist = typeof json.author_name === 'string' ? json.author_name.replace(/\s*-\s*Topic\s*$/i, '').trim() : '';
+      return { title, artist };
+    } finally {
+      clearTimeout(timer);
+      if (opts.signal) opts.signal.removeEventListener('abort', onOuterAbort);
+    }
+  } catch {
+    return null;
+  }
+}
+
+export async function searchStandardDouble(query, opts = {}) {
+  const fetchImpl = opts.fetchImpl || fetch;
+  const timeoutMs = opts.timeoutMs ?? 12000;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetchImpl(`${WEB_SEARCH_ENDPOINT}?key=${WEB_SEARCH_KEY}&prettyPrint=false`, {
+        method: 'POST',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          context: { client: { clientName: 'WEB', clientVersion: '2.20250728.01.00', hl: 'en' } },
+          query,
+        }),
+        signal: controller.signal,
+      });
+      if (!res.ok) return [];
+      return rankCandidates(parseInnerTubeSearch(await res.json()), null, 0);
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    return [];
+  }
+}
+
+export function pickDoubleCandidate(candidates, originalVideoId, originalDurationSec, artistName) {
+  const ranked = rankCandidates(candidates, originalVideoId, originalDurationSec, artistName);
+  return ranked.length > 0 ? ranked[0] : null;
+}
+
+export async function extractWithDoublePivot(videoId, opts = {}) {
+  const budgetMs = Math.max(400, Math.floor(Number(opts.timeoutMs) || 15000));
+  const deadline = Date.now() + budgetMs;
+  const left = () => Math.max(200, deadline - Date.now());
+  if (!opts.prioritizeDouble) {
+    const primary = await mintSignedUrl(videoId, { ...opts, timeoutMs: left() });
+    if (primary) return primary;
+  }
+  try {
+    let title = '';
+    let artist = '';
+    const info = await fetchOembedInfo(videoId, { ...opts, timeoutMs: left() });
+    if (info) {
+      title = info.title;
+      artist = info.artist;
+    }
+    if (!title) {
+      title = await fetchWatchTitle(videoId, opts);
+    }
+    if (!title) return null;
+    let candidates = await searchStandardDouble(`${title} official audio`, { ...opts, timeoutMs: left() });
+    if (candidates.length === 0) {
+      candidates = await searchStandardDouble(`${title} lyric`, { ...opts, timeoutMs: left() });
+    }
+    const ordered = rankCandidates(candidates, videoId, opts.originalDurationSec || 0, artist);
+    for (const cand of ordered) {
+      if (Date.now() >= deadline) break;
+      const minted = await mintSignedUrl(cand.videoId, { ...opts, timeoutMs: left() });
+      if (minted) {
+        return {
+          ...minted,
+          artist: artist || minted.artist,
+          doubled: true,
+          originalVideoId: videoId,
+          viaVideoId: cand.videoId,
+        };
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // pickBestAudioFormat — filter audio streams with plain url, highest bitrate
 // ---------------------------------------------------------------------------
 
@@ -241,7 +449,7 @@ export default {
           ? Number(env.SIGNER_TIMEOUT_MS) || 15000
           : 15000;
 
-      const result = await mintSignedUrl(videoId, {
+      const result = await extractWithDoublePivot(videoId, {
         timeoutMs,
         signal: request.signal,
       });
