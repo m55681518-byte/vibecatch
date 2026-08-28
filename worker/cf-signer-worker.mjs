@@ -10,7 +10,7 @@
 // The PWA fetches /resolve, then streams audioUrl directly to the device via
 // plain <audio> (no CORS on the googlevideo bytes — Turn A handles that).
 
-import { mintSignedUrl } from './cf-signer-core.mjs';
+import { extractWithDoublePivot } from './cf-signer-core.mjs';
 
 const NAME = 'vibecatch-cf-signer';
 const VERSION = '1.0.0';
@@ -64,7 +64,7 @@ export default {
           ? Number(env.SIGNER_TIMEOUT_MS) || 15000
           : 15000;
 
-      const result = await mintSignedUrl(videoId, {
+      const result = await extractWithDoublePivot(videoId, {
         timeoutMs,
         signal: request.signal,
       });
