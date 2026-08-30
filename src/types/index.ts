@@ -62,6 +62,7 @@ export interface ExtractionResult {
   success: boolean;
   track?: Track;
   error?: string;
+  requiresNativeApp?: boolean;
   rawDetails?: {
     author?: string;
     description?: string;

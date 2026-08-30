@@ -259,6 +259,114 @@ function createProviderPromise(
 }
 
 // ---------------------------------------------------------------------------
+// Strict-Track Marker
+// ---------------------------------------------------------------------------
+
+export const STRICT_TRACK_ERROR_BODY = 'all youtube clients failed for this video';
+
+// ---------------------------------------------------------------------------
+// Signal-Aware Race Resolver (STRICT-TRACK detection)
+// ---------------------------------------------------------------------------
+
+/**
+ * Variant of createProviderPromise that reads the body on non-ok responses
+ * so we can detect the strict-track marker even on 502.
+ */
+function createSignalProviderPromise(
+  provider: ProviderDescriptor,
+  videoId: string,
+  timeoutMs: number,
+  fetchImpl: typeof fetch,
+  onStrictTrackSignal?: () => void,
+): Promise<ResolvedAudio> {
+  return new Promise<ResolvedAudio>((resolve, reject) => {
+    const controller = new AbortController();
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        controller.abort();
+        reject(new Error(`${provider.name} timed out`));
+      }
+    }, timeoutMs);
+
+    const url =
+      provider.method === 'GET'
+        ? provider.endpoint.replace('{id}', videoId)
+        : provider.endpoint;
+
+    const init: RequestInit = { signal: controller.signal as any };
+
+    if (provider.method === 'POST') {
+      init.method = 'POST';
+      init.headers = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      };
+      init.body = JSON.stringify({
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+        downloadMode: 'audio',
+      });
+    }
+
+    fetchImpl(url, init)
+      .then(async (res: Response) => {
+        if (settled) return;
+
+        if (!res.ok) {
+          // Read body so callers can detect the strict-track marker on 502
+          let body: any = null;
+          try {
+            body = await res.json();
+          } catch {
+            // non-JSON body — ignore
+          }
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          // Detect strict-track signal directly via callback
+          if (
+            res.status === 502 &&
+            body &&
+            typeof body.error === 'string' &&
+            body.error === STRICT_TRACK_ERROR_BODY
+          ) {
+            onStrictTrackSignal?.();
+          }
+          reject(new Error(`HTTP ${res.status}`));
+          return;
+        }
+
+        const json = await res.json();
+
+        // Try all normalizers — any shape may come from any provider
+        let normalized: ResolvedAudio | null = null;
+        normalized = normalizeCobaltAudio(json)
+          ?? normalizePipedStreams(json)
+          ?? normalizeInvidiousAdaptive(json)
+          ?? normalizeSignerResponse(json);
+
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+
+        if (normalized) {
+          resolve({ ...normalized, source: provider.name });
+        } else {
+          reject(new Error(`${provider.name} returned unusable data`));
+        }
+      })
+      .catch((err: any) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Race Resolver
 // ---------------------------------------------------------------------------
 
@@ -284,6 +392,39 @@ export async function raceYouTubeResolvers(
   } catch {
     return null;
   }
+}
+
+/**
+ * Race all providers and return the first successful result *plus* a
+ * strict-track signal.  The signal is true IFF any provider responded with
+ * HTTP 502 and a JSON body `{ error: "all youtube clients failed for this video" }`.
+ */
+export async function raceYouTubeResolversWithSignal(
+  videoId: string,
+  opts?: RaceOpts,
+): Promise<{ resolved: ResolvedAudio | null; strictTrackSignal: boolean }> {
+  const providers = opts?.providers ?? PROVIDERS_YT;
+  const timeoutMs = opts?.timeoutMs ?? 6000;
+  const fetchImpl = opts?.fetchImpl ?? fetch;
+
+  let strictTrackSignal = false;
+
+  const attempts = providers.map((p) =>
+    createSignalProviderPromise(p, videoId, timeoutMs, fetchImpl, () => {
+      strictTrackSignal = true;
+    }),
+  );
+
+  // Standard race: first successful provider wins.
+  // If all fail, the catch-all still returns null.
+  let resolved: ResolvedAudio | null = null;
+  try {
+    resolved = await Promise.any(attempts);
+  } catch {
+    // all providers failed — signal may or may not have been set via callback
+  }
+
+  return { resolved, strictTrackSignal };
 }
 
 // ---------------------------------------------------------------------------
