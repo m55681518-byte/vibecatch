@@ -665,8 +665,14 @@ async function extractYouTube3Tier(cleanUrl: string): Promise<ExtractionResult> 
     }
   }
 
-  // Fall back to public provider race
-  const resolved = await raceYouTubeResolvers(videoId);
+  // Fall back to public provider race (with strict-track signal)
+  // Dynamic import keeps compatibility with test stubs that only export raceYouTubeResolvers
+  const dynamicResolvers = await import('./resolvers').catch(() => ({})) as Partial<typeof import('./resolvers')>;
+  const signalRace = dynamicResolvers.raceYouTubeResolversWithSignal;
+  const signalResult = typeof signalRace === 'function'
+    ? await signalRace(videoId)
+    : { resolved: await raceYouTubeResolvers(videoId), strictTrackSignal: false };
+  const { resolved, strictTrackSignal } = signalResult;
 
   if (resolved) {
     const kind = resolved.source.startsWith('cobalt') ? 'cobalt'
@@ -737,10 +743,26 @@ async function extractYouTube3Tier(cleanUrl: string): Promise<ExtractionResult> 
     return { success: true, track };
   }
 
-  // All providers failed — honest failure, no fabricated track
+  // All providers failed — check for strict-track signal
+  return buildAllProvidersFailedResult(strictTrackSignal);
+}
+
+/**
+ * Build the failure result for the all-providers-failed path.
+ * When strictTrackSignal is true, surfaces a native-app required card.
+ * When false, returns the existing generic busy message.
+ */
+export function buildAllProvidersFailedResult(strictTrackSignal: boolean): ExtractionResult {
+  if (strictTrackSignal) {
+    return {
+      success: false,
+      requiresNativeApp: true,
+      error: 'This high-security track requires our native Android app to extract. Download the APK here.',
+    };
+  }
   return {
     success: false,
-    error: 'All free audio resolvers are busy or offline right now - please try again in a moment.',
+    error: 'All free audio resolvers are busy or offline. Please try again in a few seconds.',
   };
 }
 

@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { extractMedia, CURATED_TRACKS, detectPlatform } from '../services/extractor';
-import { isAndroidDevice, buildSetupCommand, shouldShowSetupCard } from '../services/androidSetup';
+import { isAndroidDevice, buildSetupCommand, shouldShowSetupCard, buildStrictTrackError, APK_DOWNLOAD_URL } from '../services/androidSetup';
 import { probeLocalNode } from '../services/localNode';
 import { Track } from '../types';
 import { downloadProjectZip } from '../assets/projectZipBase64';
@@ -44,6 +44,7 @@ export const DiscoverTab: React.FC = () => {
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [showTierInfo, setShowTierInfo] = useState(false);
   const [showSetupCard, setShowSetupCard] = useState(false);
+  const [nativeAppRequired, setNativeAppRequired] = useState(false);
 
   // Auto-fill and auto-extract when intercepted from Android Web Share Target
   useEffect(() => {
@@ -75,6 +76,7 @@ export const DiscoverTab: React.FC = () => {
     setIsExtracting(true);
     setExtractionError(null);
     setExtractedTrack(null);
+    setNativeAppRequired(false);
 
     try {
       const result = await extractMedia(target);
@@ -82,8 +84,13 @@ export const DiscoverTab: React.FC = () => {
         setExtractedTrack(result.track);
         // Automatically save to library
         await saveTrackToLibrary(result.track);
+      } else if (result.requiresNativeApp) {
+        setNativeAppRequired(true);
+        setExtractionError(null);
+        setShowSetupCard(false);
       } else {
         setExtractionError(result.error || 'Could not resolve media stream from this link.');
+        setNativeAppRequired(false);
       }
     } catch (err: any) {
       setExtractionError(err.message || 'Decentralized extraction encountered an error.');
@@ -287,8 +294,29 @@ export const DiscoverTab: React.FC = () => {
             </div>
           </div>
 
+          {/* Native App Required Card */}
+          {nativeAppRequired && (
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-red-500/10 border border-amber-500/30 space-y-3 animate-in fade-in">
+              <div className="flex items-center space-x-2">
+                <Cpu className="w-4 h-4 text-amber-400" />
+                <h4 className="text-sm font-bold text-amber-300">Native Android App Required</h4>
+              </div>
+              <p className="text-xs text-slate-300">
+                This high-security track requires our native Android app to extract.
+              </p>
+              <a
+                href={APK_DOWNLOAD_URL}
+                download="vibecatch.apk"
+                className="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 text-amber-300 text-xs font-bold hover:from-amber-500/30 hover:to-orange-500/30 transition-all"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Download the APK here</span>
+              </a>
+            </div>
+          )}
+
           {/* Error Banner */}
-          {extractionError && (
+          {extractionError && !nativeAppRequired && (
             <div className="flex items-start space-x-2.5 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs animate-in fade-in">
               <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
               <span>{extractionError}</span>
