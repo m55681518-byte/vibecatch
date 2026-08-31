@@ -1,7 +1,30 @@
 import confetti from 'canvas-confetti';
 import { Track, DemuxProgress } from '../types';
 import { saveAudioBlob, getAudioBlob, saveTrack } from './db';
-import { pickDownloadUrl, audioFormatMeta, playbackSourceFor } from './downloadUrl';
+import { pickDownloadUrl, audioFormatMeta, playbackSourceFor, fetchUrlForDownload } from './downloadUrl';
+import { probeLocalNode, probeRelayManifest } from './localNode';
+
+/**
+ * Best-effort discovery of a CORS-enabled relay base for browser byte-downloads.
+ * Tries the local node (127.0.0.1) first, then the remote relay pool. NEVER throws.
+ * Returns a base like "http://127.0.0.1:8794" or "https://relay.trycloudflare.com"
+ * (no trailing slash), or null when nothing is reachable.
+ */
+async function discoverRelayBase(): Promise<string | null> {
+  try {
+    const local = await probeLocalNode();
+    if (local) return `http://127.0.0.1:${local.port}`;
+  } catch {
+    // fall through to relay pool
+  }
+  try {
+    const relay = await probeRelayManifest();
+    if (relay) return relay.baseUrl;
+  } catch {
+    // no relay
+  }
+  return null;
+}
 
 /**
  * Downloads media audio stream directly in-memory, saves to IndexedDB,
@@ -33,7 +56,10 @@ export async function downloadAudioDirectly(
         message: 'Fetching audio chunks directly from CDN...',
       });
 
-      const response = await fetch(pickDownloadUrl(track), {
+      const relayBase = await discoverRelayBase();
+      const fetchUrl = fetchUrlForDownload(track, relayBase);
+
+      const response = await fetch(fetchUrl, {
         headers: {
           'Accept': 'audio/*, video/*',
         },
@@ -159,7 +185,7 @@ export async function cacheTrackOffline(
       message: 'Fetching audio for offline cache...',
     });
 
-    const response = await fetch(pickDownloadUrl(track));
+    const response = await fetch(fetchUrlForDownload(track, await discoverRelayBase()));
     if (!response.ok) throw new Error('Offline fetch failed');
 
     const buffer = await response.arrayBuffer();
