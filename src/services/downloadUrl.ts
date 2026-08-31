@@ -4,6 +4,8 @@
 // downloads must go through the local node's yt-dlp /download endpoint,
 // which pipes the complete file (cookie-jar bot-wall bypass).
 
+import { buildRelayStreamUrl } from './localNode';
+
 export interface DownloadSource {
   streamUrl: string;
   downloadUrl?: string;
@@ -33,6 +35,57 @@ export function isDirectStreamUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * True when a host is a YouTube/googlevideo CDN that serves media bytes WITHOUT
+ * any Access-Control-Allow-Origin header — i.e. safe to *play* via a plain
+ * <audio> element but NOT safe to `fetch()` cross-origin from the PWA.
+ */
+export function isNoCorsCdnHost(url: string): boolean {
+  if (typeof url !== 'string' || !url) return false;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === 'googlevideo.com' || host.endsWith('.googlevideo.com');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Build the CORS-safe URL the browser may `fetch()` for a full-file download.
+ *
+ * A raw googlevideo CDN URL sends NO `Access-Control-Allow-Origin`, so a browser
+ * `fetch()` from the PWA origin is blocked. Such URLs are safe to *play* via a
+ * plain <audio> element (no CORS needed) but MUST NOT be fetched for
+ * byte-download. When the effective source is a no-CORS googlevideo host we
+ * route it through a CORS-enabled relay (`/stream?url=...`), which the relay
+ * wraps with `Access-Control-Allow-Origin: *`. Non-CDN https hosts (e.g. a
+ * CORS-friendly pixabay asset) pass through unchanged.
+ *
+ * - explicit relay `downloadUrl` (e.g. `/download?videoId=`) -> used as-is
+ * - raw googlevideo source + relayBase -> wrapped into `<base>/stream?url=<src>`
+ * - raw googlevideo source + NO relayBase -> throws a CORS-aware error
+ * - any other https source -> returned unchanged
+ *
+ * Pure / deterministic; NEVER emits a bare googlevideo cross-origin fetch.
+ */
+export function fetchUrlForDownload(
+  track: DownloadSource,
+  relayBase?: string | null
+): string {
+  const prefer = track.downloadUrl || track.streamUrl || '';
+  if (!prefer) {
+    throw new Error('No audio source available for this track.');
+  }
+  if (isNoCorsCdnHost(prefer)) {
+    if (relayBase) return buildRelayStreamUrl(relayBase, prefer);
+    throw new Error(
+      'CORS block: this track is served by the Google CDN with no cross-origin access. ' +
+      'Enable a relay (local node or pool worker) and try again.'
+    );
+  }
+  return prefer;
 }
 
 /**

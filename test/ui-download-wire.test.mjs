@@ -62,15 +62,23 @@ describe('W2 extractor sets downloadUrl on local-node tracks', () => {
   });
 });
 
-describe('W3 demuxer fetches pickDownloadUrl for save + offline cache', () => {
-  test('demuxer.ts uses pickDownloadUrl in downloadAudioDirectly AND cacheTrackOffline', () => {
+describe('W3 demuxer fetches CORS-safe download source for save + offline cache', () => {
+  test('demuxer.ts uses fetchUrlForDownload for downloadAudioDirectly + cacheTrackOffline', () => {
     const p = path.join(root, 'src', 'services', 'demuxer.ts');
     assert.ok(fs.existsSync(p));
     const src = fs.readFileSync(p, 'utf8');
     assert.match(src, /from ['"]\.\/downloadUrl['"]/, 'must import ./downloadUrl');
-    const uses = src.match(/pickDownloadUrl\s*\(/g) || [];
-    assert.ok(uses.length >= 2, `expected >=2 pickDownloadUrl call sites, got ${uses.length}`);
+    // byte-downloads (save + offline cache) must route CORS-unsafe googlevideo
+    // through fetchUrlForDownload, never raw fetch(pickDownloadUrl).
+    const fetches = src.match(/fetchUrlForDownload\s*\(/g) || [];
+    assert.ok(fetches.length >= 2, `expected >=2 fetchUrlForDownload call sites, got ${fetches.length}`);
     assert.doesNotMatch(src, /fetch\(track\.streamUrl/, 'raw streamUrl fetches are forbidden (1MiB cap)');
+  });
+
+  test('trimAudioSegment still routes through pickDownloadUrl (relay-only trimmer)', () => {
+    const src = fs.readFileSync(path.join(root, 'src', 'services', 'demuxer.ts'), 'utf8');
+    const uses = src.match(/pickDownloadUrl\s*\(/g) || [];
+    assert.ok(uses.length === 1, `expected exactly 1 pickDownloadUrl call site (trimmer), got ${uses.length}`);
   });
 
   test('saved file extension + blob mime derive from track.audioFormat', () => {
