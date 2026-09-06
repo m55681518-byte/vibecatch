@@ -392,10 +392,14 @@ export async function mintSignedUrl(videoId, opts = {}) {
 //   OPTIONS                                -> 204 + CORS
 //   /vibecheck                             -> {ok:true,name:'vibecatch-cf-signer',version}
 //   /resolve?videoId=<id>                  -> {videoId,audioUrl,title,artist,duration} + CORS
+//   /stream?url=<encoded-upstream>         -> byte proxy of the upstream (audio) + CORS
 //   anything else / non-GET                -> 404/405
 //
 // The PWA fetches /resolve, then streams audioUrl directly to the device via
 // plain <audio> (no CORS on the googlevideo bytes — Turn A handles that).
+// /stream is the CORS-safe FULL-BYTE download relay: the browser byte-download
+// fetches <signer>/stream?url=<signed-googlevideo> and the worker proxies the
+// bytes with Access-Control-Allow-Origin:* (the CDN sends no ACAO headers).
 
 const NAME = 'vibecatch-cf-signer';
 const VERSION = '1.0.0';
@@ -459,6 +463,58 @@ export default {
       }
 
       return json({ videoId, ...result }, 200);
+    }
+
+    if (pathname === '/stream') {
+      const upstreamParam = url.searchParams.get('url');
+      if (!upstreamParam) {
+        return json({ error: 'missing url parameter' }, 400);
+      }
+      let upstream;
+      try {
+        upstream = new URL(upstreamParam);
+      } catch {
+        return json({ error: 'invalid url' }, 400);
+      }
+      if (upstream.protocol !== 'http:' && upstream.protocol !== 'https:') {
+        return json({ error: 'only http/https URLs allowed' }, 400);
+      }
+
+      const fwdHeaders = {};
+      if (request.headers.get('range')) fwdHeaders['Range'] = request.headers.get('range');
+
+      let upstreamResp;
+      try {
+        upstreamResp = await fetch(upstream.href, {
+          headers: fwdHeaders,
+          signal: request.signal,
+        });
+      } catch {
+        return json({ error: 'upstream fetch failed' }, 502);
+      }
+      if (upstreamResp.status >= 400) {
+        return json({ error: 'upstream failed: ' + upstreamResp.status }, 502);
+      }
+
+      const respHeaders = {
+        'Content-Type': upstreamResp.headers.get('content-type') || 'application/octet-stream',
+        'Content-Disposition': 'attachment; filename="vibecatch-audio"',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET,OPTIONS',
+        'Access-Control-Allow-Headers': '*',
+        'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
+      };
+      const cl = upstreamResp.headers.get('content-length');
+      if (cl) respHeaders['Content-Length'] = cl;
+      const cr = upstreamResp.headers.get('content-range');
+      if (cr) respHeaders['Content-Range'] = cr;
+      const ar = upstreamResp.headers.get('accept-ranges');
+      if (ar) respHeaders['Accept-Ranges'] = ar;
+
+      return new Response(upstreamResp.body, {
+        status: upstreamResp.status,
+        headers: respHeaders,
+      });
     }
 
     return json({ error: 'not found' }, 404);
