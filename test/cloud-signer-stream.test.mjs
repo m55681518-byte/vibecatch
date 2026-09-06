@@ -38,7 +38,7 @@ async function loadWorker() {
 function makeUpstream({ status = 200, headers = {}, body = null, onFetch } = {}) {
   const bytes = body !== null
     ? body
-    : Buffer.from(JSON.stringify({ kind: 'audio-bytes', n: 131072 }));
+    : Buffer.alloc(131072, (i) => (i * 7) & 0xff);
   const upstream = async (input, init) => {
     onFetch && onFetch(input, init);
     const h = Object.assign({
@@ -179,11 +179,17 @@ describe('CS6 PWA download path is cloud-only (zero laptop)', () => {
   test('demuxer discoverRelayBase returns the always-on cloud signer base', () => {
     assert.ok(fs.existsSync(demuxerPath), 'demuxer.ts must exist');
     const src = fs.readFileSync(demuxerPath, 'utf8');
+    // The discovery function must route byte-downloads through the always-on
+    // cloud signer base, NOT the laptop node / laptop quick-tunnels.
     const start = src.indexOf('async function discoverRelayBase');
     assert.ok(start > -1, 'discoverRelayBase must exist');
-    const body = src.slice(start, start + 900);
-    assert.match(body, /vibecatch-signer\.pages\.dev/, 'discoverRelayBase must return the cloud signer base');
-    assert.doesNotMatch(body, /127\.0\.0\.1|probeLocalNode\s*\(|probeRelayManifest\s*\(/, 'cloud relay discovery must NOT depend on the laptop node/tunnel');
+    const fnBody = src.slice(start, start + 400);
+    const constIdx = src.lastIndexOf('CLOUD_SIGNER_BASE =', start);
+    assert.ok(constIdx > -1, 'CLOUD_SIGNER_BASE constant must be defined');
+    const constLine = src.slice(constIdx, constIdx + 120);
+    assert.match(constLine, /vibecatch-signer\.pages\.dev/, 'CLOUD_SIGNER_BASE must point at the always-on cloud signer');
+    assert.match(fnBody, /CLOUD_SIGNER_BASE/, 'discoverRelayBase must return the cloud signer base');
+    assert.doesNotMatch(fnBody, /127\.0\.0\.1|probeLocalNode\s*\(|probeRelayManifest\s*\(/, 'cloud relay discovery must NOT depend on the laptop node/tunnel');
   });
 
   test('fetchUrlForDownload wraps a direct googlevideo URL into cloud /stream', async () => {

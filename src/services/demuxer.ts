@@ -2,28 +2,22 @@ import confetti from 'canvas-confetti';
 import { Track, DemuxProgress } from '../types';
 import { saveAudioBlob, getAudioBlob, saveTrack } from './db';
 import { pickDownloadUrl, audioFormatMeta, playbackSourceFor, fetchUrlForDownload } from './downloadUrl';
-import { probeLocalNode, probeRelayManifest } from './localNode';
 
 /**
- * Best-effort discovery of a CORS-enabled relay base for browser byte-downloads.
- * Tries the local node (127.0.0.1) first, then the remote relay pool. NEVER throws.
- * Returns a base like "http://127.0.0.1:8794" or "https://relay.trycloudflare.com"
- * (no trailing slash), or null when nothing is reachable.
+ * Always-on Cloudflare Pages signer base. It mints signed googlevideo URLs for
+ * playback (/resolve) AND relays full audio bytes with CORS for byte-downloads
+ * (/stream?url=...) — laptop-free and tunnel-free by design.
+ */
+export const CLOUD_SIGNER_BASE = 'https://vibecatch-signer.pages.dev';
+
+/**
+ * CORS-enabled relay base for browser byte-downloads. ALWAYS the always-on
+ * cloud signer (zero laptop dependency) — never 127.0.0.1 or a laptop tunnel.
+ * NEVER throws. Returns a base (no trailing slash) or null in the edge case
+ * where the app is built without a signer base.
  */
 async function discoverRelayBase(): Promise<string | null> {
-  try {
-    const local = await probeLocalNode();
-    if (local) return `http://127.0.0.1:${local.port}`;
-  } catch {
-    // fall through to relay pool
-  }
-  try {
-    const relay = await probeRelayManifest();
-    if (relay) return relay.baseUrl;
-  } catch {
-    // no relay
-  }
-  return null;
+  return CLOUD_SIGNER_BASE || null;
 }
 
 /**
