@@ -481,7 +481,7 @@ export default {
       }
 
       const fwdHeaders = {};
-      if (request.headers.get('range')) fwdHeaders['Range'] = request.headers.get('range');
+      fwdHeaders['Range'] = request.headers.get('range') || 'bytes=0-';
 
       let upstreamResp;
       try {
