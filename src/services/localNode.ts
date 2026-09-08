@@ -324,3 +324,85 @@ export async function resolveViaRelay(
     return null;
   }
 }
+
+export interface RelayPoolOpts {
+  fetchImpl?: typeof fetch;
+  manifestUrl?: string;
+  vibeTimeoutMs?: number;
+  resolveTimeoutMs?: number;
+}
+
+/**
+ * Resolve a video via the REMOTE relay POOL (workers.json) with failover.
+ * Probes EVERY manifest entry's /vibecheck, collects all healthy relays in
+ * manifest order, then tries /resolve on each until one answers. NEVER throws.
+ */
+export async function resolveViaRelayPool(
+  videoId: string,
+  opts?: RelayPoolOpts,
+): Promise<ResolvedAudio | null> {
+  const fetchImpl = opts?.fetchImpl ?? fetch;
+  const vibeTimeoutMs = opts?.vibeTimeoutMs ?? 6000;
+  const resolveTimeoutMs = opts?.resolveTimeoutMs ?? 20000;
+  const manifestUrl =
+    opts?.manifestUrl ?? resolveRelayManifestUrl();
+
+  let entries: string[];
+  try {
+    const res = await fetchImpl(manifestUrl);
+    if (!res.ok) return null;
+    const parsed = await res.json();
+    entries = Array.isArray(parsed) ? parsed.filter((e) => typeof e === 'string') : [];
+  } catch {
+    return null;
+  }
+
+  // Probe every /vibecheck entry; collect ALL healthy relays in manifest order.
+  const healthy: string[] = [];
+  for (const entry of entries) {
+    if (!/\/vibecheck$/.test(entry)) continue;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), vibeTimeoutMs);
+      const probe = await fetchImpl(entry, { signal: controller.signal as any });
+      clearTimeout(timer);
+      if (!probe.ok) continue;
+      const parsed = await probe.json();
+      if (parsed && parsed.ok === true && /vibecatch/.test(parsed.name || '')) {
+        healthy.push(entry);
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  // Try /resolve on each healthy relay in order; first audioUrl wins.
+  for (const entry of healthy) {
+    const base = entry.replace(/\/vibecheck$/, '').replace(/\/+$/, '');
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), resolveTimeoutMs);
+      const res = await fetchImpl(`${base}/resolve?videoId=${encodeURIComponent(videoId)}`, {
+        signal: controller.signal as any,
+      });
+      clearTimeout(timer);
+      if (!res.ok) continue;
+      const json = await res.json();
+      if (json && json.audioUrl) {
+        return {
+          audioUrl: json.audioUrl,
+          title: json.title || '',
+          artist: json.artist || '',
+          duration: json.duration || 0,
+          source: 'relay',
+          port: 0,
+          baseUrl: base,
+        };
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
