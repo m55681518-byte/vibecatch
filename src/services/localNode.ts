@@ -156,28 +156,59 @@ async function tryResolveOnPort(
   port: number,
   fetchImpl: typeof fetch,
 ): Promise<ResolvedAudio | null> {
-  try {
-    const res = await fetchImpl(
-      `http://127.0.0.1:${port}/resolve?videoId=${encodeURIComponent(videoId)}`,
-    );
+  // Bound the WHOLE call, not just the fetch: a fetch that never settles
+  // (hung loopback request from an HTTPS origin) must still fall through to
+  // the relay pool / cloud signer instead of hanging the 3-tier chain.
+  const budget = 2500;
+  let timer: ReturnType<typeof setTimeout> | undefined;
 
-    if (!res.ok) return null;
+  const attempt = (async () => {
+    try {
+      const controller = new AbortController();
+      const signal = controller.signal as any;
+      const settle = setTimeout(() => controller.abort(), budget);
 
-    const json = await res.json();
+      let res: Response;
+      try {
+        res = await fetchImpl(
+          `http://127.0.0.1:${port}/resolve?videoId=${encodeURIComponent(videoId)}`,
+          { signal },
+        );
+      } finally {
+        clearTimeout(settle);
+      }
 
-    if (json && json.audioUrl) {
-      return {
-        audioUrl: json.audioUrl,
-        title: json.title || '',
-        artist: json.artist || '',
-        duration: json.duration || 0,
-        source: 'local-node',
-        port,
-      };
+      if (!res.ok) return null;
+
+      const json = await res.json();
+
+      if (json && json.audioUrl) {
+        return {
+          audioUrl: json.audioUrl,
+          title: json.title || '',
+          artist: json.artist || '',
+          duration: json.duration || 0,
+          source: 'local-node',
+          port,
+        };
+      }
+
+      return null;
+    } catch {
+      return null;
     }
+  })();
 
-    return null;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), budget);
+  });
+
+  try {
+    const result = await Promise.race([attempt, timeout]);
+    clearTimeout(timer);
+    return result;
   } catch {
+    clearTimeout(timer);
     return null;
   }
 }
