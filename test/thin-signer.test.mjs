@@ -12,8 +12,9 @@
 // TS2: playbackSourceFor prefers a DIRECT streamUrl over relay downloadUrl
 //      (while keeping the legacy relay-wrapped ordering download > stream).
 // TS3: playbackChain yields the ordered, deduped fallback list for a track.
-// TS4: extractor relay path sets streamUrl = RAW minted audioUrl (no /stream
-//      wrap); downloadUrl remains the relay fallback.
+// TS4: extractor relay path resolves through the relay POOL and routes BOTH
+//      streamUrl + downloadUrl through the relay /stream proxy (never the raw
+//      minted URL, never the /download endpoint).
 // TS5: audioEngine does not force crossOrigin on direct URLs (googlevideo
 //      sends no ACAO headers) and owns a one-shot relay fallback on error.
 import { test, describe } from 'node:test';
@@ -111,21 +112,18 @@ describe('TS3 playbackChain ordered + deduped', () => {
   });
 });
 
-describe('TS4 extractor relay path emits raw minted audioUrl as streamUrl', () => {
-  test('relay branch sets streamUrl = audioUrl raw (no /stream wrap), keeps relay downloadUrl', () => {
+describe('TS4 extractor relay path routes through the relay POOL /stream proxy', () => {
+  test('relay branch wires streamUrl + downloadUrl via buildRelayStreamUrl (pool)', () => {
     const src = fs.readFileSync(extractorPath, 'utf8');
-    const relayBranch = src.slice(src.indexOf('resolveViaRelay'), src.indexOf('// Fall back to public provider race'));
-    assert.match(relayBranch, /streamUrl:\s*relayHit\.audioUrl\s*,/,
-      'relay streamUrl must be the RAW minted googlevideo URL (direct-to-device)');
-    assert.doesNotMatch(relayBranch, /buildRelayStreamUrl\s*\(\s*relay\.baseUrl\s*,\s*relayHit\.audioUrl\s*\)/,
-      'must NOT wrap the minted URL through relay /stream');
-  });
-
-  test('downloadUrl stays a relay /download (fallback + full-file saves)', () => {
-    const src = fs.readFileSync(extractorPath, 'utf8');
-    const relayBranch = src.slice(src.indexOf('resolveViaRelay'), src.indexOf('// Fall back to public provider race'));
-    assert.match(relayBranch, /downloadUrl:\s*buildRelayDownloadUrl\s*\(/,
-      'relay downloadUrl fallback must remain');
+    const relayBranch = src.slice(src.indexOf('resolveViaRelayPool'), src.indexOf('// Fall back to public provider race'));
+    assert.match(relayBranch, /streamUrl:\s*buildRelayStreamUrl\s*\(/,
+      'relay streamUrl must be built through the /stream proxy');
+    assert.match(relayBranch, /downloadUrl:\s*buildRelayStreamUrl\s*\(/,
+      'relay downloadUrl must also go through the /stream proxy');
+    assert.doesNotMatch(relayBranch, /streamUrl:\s*relayHit\.audioUrl\s*,/,
+      'must NOT emit the raw minted googlevideo URL as streamUrl');
+    assert.doesNotMatch(relayBranch, /buildRelayDownloadUrl\s*\(/,
+      'must NOT use the /download endpoint');
   });
 });
 

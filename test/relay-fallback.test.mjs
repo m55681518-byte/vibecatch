@@ -9,7 +9,9 @@
 //      returns { baseUrl, version } for a healthy relay (or null).
 // RF3: resolveViaRelay resolves a video against a relay base and returns a
 //      ResolvedAudio carrying baseUrl + source 'relay'.
-// RF4: extractor.ts wires the relay fallback (probe -> resolve -> relay URLs).
+// RF4: extractor.ts wires the relay fallback THROUGH THE POOL
+//      (resolveViaRelayPool -> buildRelayStreamUrl for streamUrl/downloadUrl).
+//      The single-relay probe/resolve path is superseded by pool failover.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -96,11 +98,11 @@ describe('RF3 resolveViaRelay resolves against a relay base', () => {
   });
 });
 
-describe('RF4 extractor wires the relay fallback', () => {
-  test('extractor.ts imports + uses relay probe/resolve and relay URL builders', () => {
+describe('RF4 extractor wires the relay fallback through the pool', () => {
+  test('extractor.ts resolves via the relay POOL and builds relay /stream URLs', () => {
     const src = fs.readFileSync(extractorPath, 'utf8');
-    assert.match(src, /probeRelayManifest\s*\(/, 'must probe the relay manifest when no local node');
-    assert.match(src, /resolveViaRelay\s*\(/, 'must resolve via the relay when no local node');
-    assert.match(src, /buildRelayDownloadUrl\s*\(/, 'must build relay download URLs');
+    assert.match(src, /resolveViaRelayPool\s*\(/, 'must resolve via the relay POOL when no local node');
+    assert.match(src, /streamUrl:\s*buildRelayStreamUrl\s*\(/, 'relay track streamUrl must be the /stream proxy URL');
+    assert.match(src, /downloadUrl:\s*buildRelayStreamUrl\s*\(/, 'relay track downloadUrl must be the /stream proxy, not /download');
   });
 });
