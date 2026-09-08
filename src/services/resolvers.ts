@@ -172,7 +172,7 @@ export function normalizeInvidiousAdaptive(
 export function normalizeSignerResponse(
   json: Record<string, any>,
 ): ResolvedAudio | null {
-  if (!json || json.ok !== true || typeof json.audioUrl !== 'string' || json.audioUrl.length === 0) {
+  if (!json || typeof json.audioUrl !== 'string' || json.audioUrl.length === 0) {
     return null;
   }
   return {
@@ -204,7 +204,7 @@ function createProviderPromise(
         controller.abort();
         reject(new Error(`${provider.name} timed out`));
       }
-    }, timeoutMs);
+    }, provider.kind === 'signer' ? Math.max(timeoutMs, SIGNER_STRICT_TIMEOUT_MS) : timeoutMs);
 
     const url =
       provider.method === 'GET'
@@ -263,6 +263,7 @@ function createProviderPromise(
 // ---------------------------------------------------------------------------
 
 export const STRICT_TRACK_ERROR_BODY = 'all youtube clients failed for this video';
+export const SIGNER_STRICT_TIMEOUT_MS = 25000;
 
 // ---------------------------------------------------------------------------
 // Signal-Aware Race Resolver (STRICT-TRACK detection)
@@ -289,7 +290,7 @@ function createSignalProviderPromise(
         controller.abort();
         reject(new Error(`${provider.name} timed out`));
       }
-    }, timeoutMs);
+    }, provider.kind === 'signer' ? Math.max(timeoutMs, SIGNER_STRICT_TIMEOUT_MS) : timeoutMs);
 
     const url =
       provider.method === 'GET'
