@@ -41,8 +41,10 @@ self.addEventListener('fetch', (event) => {
   // Do not intercept non-GET requests or range requests directly unless cached
   if (request.method !== 'GET') return;
 
-  // Let media blob & range streams handle natively or through client IndexedDB
-  if (url.protocol === 'blob:' || url.protocol === 'data:' || url.pathname.includes('/stream/')) {
+  // Let media blob & range streams handle natively or through client IndexedDB.
+  // Match /stream (no trailing slash) for CORS-relay download fetches
+  // (/stream?url=...) as well as /stream/... paths.
+  if (url.protocol === 'blob:' || url.protocol === 'data:' || url.pathname.startsWith('/stream')) {
     return;
   }
 
