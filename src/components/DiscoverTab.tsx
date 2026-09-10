@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Sparkles,
   Link,
@@ -46,11 +46,18 @@ export const DiscoverTab: React.FC = () => {
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [showTierInfo, setShowTierInfo] = useState(false);
   const [showSetupCard, setShowSetupCard] = useState(false);
+  const [isAutoRetrying, setIsAutoRetrying] = useState(false);
+  const retryCountRef = useRef(0);
+  const autoRetryingRef = useRef(false);
+
+  const isTransientError = (msg: string) =>
+    /busy|blocked|could not resolve/i.test(msg);
 
   // Auto-fill and auto-extract when intercepted from Android Web Share Target
   useEffect(() => {
     if (interceptedUrl) {
       setInputUrl(interceptedUrl);
+      retryCountRef.current = 0;
       handleExtract(interceptedUrl);
       clearInterceptedUrl();
     }
@@ -70,8 +77,8 @@ export const DiscoverTab: React.FC = () => {
     }
   };
 
-  const handleExtract = async (urlToExtract = inputUrl) => {
-    const target = urlToExtract.trim();
+  const handleExtract = useCallback(async (urlToExtract?: string) => {
+    const target = (urlToExtract ?? inputUrl).trim();
     if (!target) return;
 
     setIsExtracting(true);
@@ -81,23 +88,44 @@ export const DiscoverTab: React.FC = () => {
     try {
       const result = await extractMedia(target);
       if (result.success && result.track) {
+        retryCountRef.current = 0;
+        autoRetryingRef.current = false;
+        setIsAutoRetrying(false);
         setExtractedTrack(result.track);
-        // Automatically save to library
         await saveTrackToLibrary(result.track);
       } else {
-        setExtractionError(result.error || 'Could not resolve media stream from this link.');
+        const errMsg = result.error || 'Could not resolve media stream from this link.';
+        if (isTransientError(errMsg) && retryCountRef.current < 1) {
+          retryCountRef.current += 1;
+          autoRetryingRef.current = true;
+          setIsAutoRetrying(true);
+          setIsExtracting(false);
+          setTimeout(() => handleExtract(target), 1500);
+          return;
+        }
+        setExtractionError(errMsg);
       }
     } catch (err: any) {
-      setExtractionError(err.message || 'Decentralized extraction encountered an error.');
-      // Show Android setup card when extraction fails on Android without a local node
+      const errMsg = err.message || 'Decentralized extraction encountered an error.';
+      if (isTransientError(errMsg) && retryCountRef.current < 1) {
+        retryCountRef.current += 1;
+        autoRetryingRef.current = true;
+        setIsAutoRetrying(true);
+        setIsExtracting(false);
+        setTimeout(() => handleExtract(target), 1500);
+        return;
+      }
+      setExtractionError(errMsg);
       const nodeInfo = await probeLocalNode().catch(() => null);
       if (shouldShowSetupCard({ android: isAndroidDevice(navigator.userAgent), nodeReachable: nodeInfo !== null })) {
         setShowSetupCard(true);
       }
     } finally {
-      setIsExtracting(false);
+      if (!autoRetryingRef.current) {
+        setIsExtracting(false);
+      }
     }
-  };
+  }, [inputUrl]);
 
   const currentPlatform = detectPlatform(inputUrl);
 
@@ -240,7 +268,12 @@ export const DiscoverTab: React.FC = () => {
               <input
                 type="text"
                 value={inputUrl}
-                onChange={(e) => setInputUrl(e.target.value)}
+                onChange={(e) => {
+                  setInputUrl(e.target.value);
+                  retryCountRef.current = 0;
+                  setIsAutoRetrying(false);
+                  autoRetryingRef.current = false;
+                }}
                 onKeyDown={(e) => e.key === 'Enter' && handleExtract()}
                 placeholder="Paste TikTok or YouTube link (e.g. vm.tiktok.com/... or youtu.be/...)"
                 className="w-full pl-11 pr-24 sm:pr-28 py-3.5 bg-[#090b14]/90 border border-white/15 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 rounded-2xl text-white text-sm placeholder-slate-500 transition-all font-mono outline-none shadow-inner"
@@ -259,13 +292,13 @@ export const DiscoverTab: React.FC = () => {
             <div className="flex flex-col sm:flex-row gap-2.5">
               <button
                 onClick={() => handleExtract()}
-                disabled={isExtracting || !inputUrl.trim()}
+                disabled={isExtracting || isAutoRetrying || !inputUrl.trim()}
                 className="flex-1 py-3.5 px-6 rounded-2xl bg-gradient-to-r from-pink-500 via-purple-600 to-cyan-400 hover:from-pink-600 hover:to-cyan-500 text-white font-bold text-sm shadow-glow-pink flex items-center justify-center space-x-2 transition-all active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
-                {isExtracting ? (
+                {isExtracting || isAutoRetrying ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Resolving 3-Tier Media Stream...</span>
+                    <span>{isAutoRetrying ? 'Retrying…' : 'Resolving 3-Tier Media Stream...'}</span>
                   </>
                 ) : (
                   <>
@@ -289,6 +322,14 @@ export const DiscoverTab: React.FC = () => {
               </button>
             </div>
           </div>
+
+          {/* Auto-Retry In Progress Banner */}
+          {isAutoRetrying && !extractionError && (
+            <div className="flex items-start space-x-2.5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs animate-in fade-in">
+              <div className="w-4 h-4 border-2 border-amber-400/30 border-t-amber-300 rounded-full animate-spin flex-shrink-0 mt-0.5" />
+              <span>Transient issue detected — retrying in a moment…</span>
+            </div>
+          )}
 
           {/* Error Banner + Retry */}
           {extractionError && (
