@@ -47,6 +47,8 @@ export const DiscoverTab: React.FC = () => {
   const [showTierInfo, setShowTierInfo] = useState(false);
   const [showSetupCard, setShowSetupCard] = useState(false);
   const [isAutoRetrying, setIsAutoRetrying] = useState(false);
+  const [isAutoDownloading, setIsAutoDownloading] = useState(false);
+  const [autoDownloadDone, setAutoDownloadDone] = useState(false);
   const retryCountRef = useRef(0);
   const autoRetryingRef = useRef(false);
 
@@ -84,6 +86,8 @@ export const DiscoverTab: React.FC = () => {
     setIsExtracting(true);
     setExtractionError(null);
     setExtractedTrack(null);
+    setAutoDownloadDone(false);
+    setIsAutoDownloading(false);
 
     try {
       const result = await extractMedia(target);
@@ -93,6 +97,14 @@ export const DiscoverTab: React.FC = () => {
         setIsAutoRetrying(false);
         setExtractedTrack(result.track);
         await saveTrackToLibrary(result.track);
+        setIsAutoDownloading(true);
+        try {
+          await downloadTrack(result.track);
+        } catch {
+          // downloadTrack manages its own error surfacing via downloadProgress
+        } finally {
+          setIsAutoDownloading(false);
+        }
       } else {
         const errMsg = result.error || 'Could not resolve media stream from this link.';
         if (isTransientError(errMsg) && retryCountRef.current < 1) {
@@ -132,6 +144,16 @@ export const DiscoverTab: React.FC = () => {
   const trackProg = extractedTrack ? downloadProgress[extractedTrack.id] : null;
   const isDownloadingExtracted = trackProg && trackProg.stage !== 'ready' && trackProg.stage !== 'idle';
   const pendingExtractedSave = trackProg?.stage === 'ready' ? trackProg.pendingSave : undefined;
+
+  useEffect(() => {
+    if (extractedTrack && trackProg) {
+      if (trackProg.stage === 'error') {
+        setAutoDownloadDone(false);
+      } else if (trackProg.stage === 'ready') {
+        setAutoDownloadDone(true);
+      }
+    }
+  }, [trackProg, extractedTrack]);
 
   return (
     <div className="space-y-6 pb-24 max-w-5xl mx-auto px-3 sm:px-4 pt-3">
@@ -295,7 +317,17 @@ export const DiscoverTab: React.FC = () => {
                 disabled={isExtracting || isAutoRetrying || !inputUrl.trim()}
                 className="flex-1 py-3.5 px-6 rounded-2xl bg-gradient-to-r from-pink-500 via-purple-600 to-cyan-400 hover:from-pink-600 hover:to-cyan-500 text-white font-bold text-sm shadow-glow-pink flex items-center justify-center space-x-2 transition-all active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
-                {isExtracting || isAutoRetrying ? (
+                {isAutoDownloading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Downloading audio...</span>
+                  </>
+                ) : autoDownloadDone ? (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>Download Complete</span>
+                  </>
+                ) : isExtracting || isAutoRetrying ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     <span>{isAutoRetrying ? 'Retrying…' : 'Resolving 3-Tier Media Stream...'}</span>
@@ -420,6 +452,25 @@ export const DiscoverTab: React.FC = () => {
             </p>
           )}
 
+          {autoDownloadDone && !pendingExtractedSave && (
+            <div className="flex items-center space-x-2.5 p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/40 text-emerald-300 text-xs sm:text-sm animate-in fade-in zoom-in-95">
+              <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+              <div className="flex-1 flex items-center justify-between gap-2 flex-wrap">
+                <span className="font-bold">Audio downloaded to this device</span>
+                <span className="text-[11px] text-emerald-400/80">
+                  {extractedTrack.title}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {autoDownloadDone && pendingExtractedSave && (
+            <div className="flex items-center space-x-2.5 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/40 text-amber-300 text-xs sm:text-sm animate-in fade-in zoom-in-95">
+              <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+              <span className="font-bold">Download ready — tap &quot;Save MP3&quot; below to save to this device</span>
+            </div>
+          )}
+
           <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-4 sm:space-y-0 sm:space-x-4">
             {/* Thumbnail */}
             <div className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden border border-white/20 flex-shrink-0 shadow-lg group">
@@ -477,7 +528,7 @@ export const DiscoverTab: React.FC = () => {
               }`}
             >
               <Download className={`w-3.5 h-3.5 ${isDownloadingExtracted ? 'animate-bounce' : ''}`} />
-              <span>{pendingExtractedSave ? 'Tap to save' : isDownloadingExtracted ? `${trackProg?.percent}%` : 'Save MP3'}</span>
+              <span>{pendingExtractedSave ? 'Tap to save' : isDownloadingExtracted ? `${trackProg?.percent}%` : autoDownloadDone ? 'Download Again' : 'Save MP3'}</span>
             </button>
 
             {/* 3. Trim Ringtone */}
