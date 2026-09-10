@@ -162,7 +162,7 @@ async function tryResolveOnPort(
   const budget = 2500;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
-  const attempt = (async () => {
+  const attempt = (async (): Promise<ResolvedAudio | null> => {
     try {
       const controller = new AbortController();
       const signal = controller.signal as any;

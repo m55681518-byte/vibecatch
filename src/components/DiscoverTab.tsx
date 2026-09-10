@@ -20,8 +20,9 @@ import {
   Check,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { triggerPendingSave } from '../services/demuxer';
 import { extractMedia, CURATED_TRACKS, detectPlatform } from '../services/extractor';
-import { isAndroidDevice, buildSetupCommand, shouldShowSetupCard, buildStrictTrackError, APK_DOWNLOAD_URL } from '../services/androidSetup';
+import { isAndroidDevice, buildSetupCommand, shouldShowSetupCard } from '../services/androidSetup';
 import { probeLocalNode } from '../services/localNode';
 import { Track } from '../types';
 import { downloadProjectZip } from '../assets/projectZipBase64';
@@ -31,6 +32,7 @@ export const DiscoverTab: React.FC = () => {
     playTrack,
     downloadTrack,
     downloadProgress,
+    clearDownloadProgress,
     saveTrackToLibrary,
     toggleFavorite,
     openTrimmer,
@@ -44,7 +46,6 @@ export const DiscoverTab: React.FC = () => {
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [showTierInfo, setShowTierInfo] = useState(false);
   const [showSetupCard, setShowSetupCard] = useState(false);
-  const [nativeAppRequired, setNativeAppRequired] = useState(false);
 
   // Auto-fill and auto-extract when intercepted from Android Web Share Target
   useEffect(() => {
@@ -76,7 +77,6 @@ export const DiscoverTab: React.FC = () => {
     setIsExtracting(true);
     setExtractionError(null);
     setExtractedTrack(null);
-    setNativeAppRequired(false);
 
     try {
       const result = await extractMedia(target);
@@ -84,13 +84,8 @@ export const DiscoverTab: React.FC = () => {
         setExtractedTrack(result.track);
         // Automatically save to library
         await saveTrackToLibrary(result.track);
-      } else if (result.requiresNativeApp) {
-        setNativeAppRequired(true);
-        setExtractionError(null);
-        setShowSetupCard(false);
       } else {
         setExtractionError(result.error || 'Could not resolve media stream from this link.');
-        setNativeAppRequired(false);
       }
     } catch (err: any) {
       setExtractionError(err.message || 'Decentralized extraction encountered an error.');
@@ -108,6 +103,7 @@ export const DiscoverTab: React.FC = () => {
 
   const trackProg = extractedTrack ? downloadProgress[extractedTrack.id] : null;
   const isDownloadingExtracted = trackProg && trackProg.stage !== 'ready' && trackProg.stage !== 'idle';
+  const pendingExtractedSave = trackProg?.stage === 'ready' ? trackProg.pendingSave : undefined;
 
   return (
     <div className="space-y-6 pb-24 max-w-5xl mx-auto px-3 sm:px-4 pt-3">
@@ -294,32 +290,21 @@ export const DiscoverTab: React.FC = () => {
             </div>
           </div>
 
-          {/* Native App Required Card */}
-          {nativeAppRequired && (
-            <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-red-500/10 border border-amber-500/30 space-y-3 animate-in fade-in">
-              <div className="flex items-center space-x-2">
-                <Cpu className="w-4 h-4 text-amber-400" />
-                <h4 className="text-sm font-bold text-amber-300">Native Android App Required</h4>
-              </div>
-              <p className="text-xs text-slate-300">
-                This high-security track requires our native Android app to extract.
-              </p>
-              <a
-                href={APK_DOWNLOAD_URL}
-                download="vibecatch.apk"
-                className="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 text-amber-300 text-xs font-bold hover:from-amber-500/30 hover:to-orange-500/30 transition-all"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Download the APK here</span>
-              </a>
-            </div>
-          )}
-
-          {/* Error Banner */}
-          {extractionError && !nativeAppRequired && (
+          {/* Error Banner + Retry */}
+          {extractionError && (
             <div className="flex items-start space-x-2.5 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs animate-in fade-in">
               <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-              <span>{extractionError}</span>
+              <div className="flex-1 space-y-2">
+                <span>{extractionError}</span>
+                <button
+                  onClick={() => handleExtract()}
+                  disabled={isExtracting}
+                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-200 text-[11px] font-bold transition-all disabled:opacity-50"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span>{isExtracting ? 'Retrying…' : 'Try again'}</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -437,12 +422,21 @@ export const DiscoverTab: React.FC = () => {
 
             {/* 2. Download MP3 Direct Action */}
             <button
-              onClick={() => downloadTrack(extractedTrack)}
-              disabled={Boolean(isDownloadingExtracted)}
-              className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-600 hover:to-teal-600 text-white text-xs font-semibold flex items-center justify-center space-x-1.5 shadow-glow-cyan transition-all active:scale-95 disabled:opacity-60"
+              onClick={() => {
+                if (pendingExtractedSave) {
+                  triggerPendingSave(pendingExtractedSave);
+                  clearDownloadProgress(extractedTrack.id);
+                } else {
+                  downloadTrack(extractedTrack);
+                }
+              }}
+              disabled={pendingExtractedSave ? false : Boolean(isDownloadingExtracted)}
+              className={`py-2.5 px-3 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-600 hover:to-teal-600 text-white text-xs font-semibold flex items-center justify-center space-x-1.5 shadow-glow-cyan transition-all active:scale-95 disabled:opacity-60 ${
+                pendingExtractedSave ? 'animate-pulse border border-amber-300' : ''
+              }`}
             >
               <Download className={`w-3.5 h-3.5 ${isDownloadingExtracted ? 'animate-bounce' : ''}`} />
-              <span>{isDownloadingExtracted ? `${trackProg?.percent}%` : 'Save MP3'}</span>
+              <span>{pendingExtractedSave ? 'Tap to save' : isDownloadingExtracted ? `${trackProg?.percent}%` : 'Save MP3'}</span>
             </button>
 
             {/* 3. Trim Ringtone */}
@@ -485,7 +479,9 @@ export const DiscoverTab: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {CURATED_TRACKS.filter((t) => t.platform === 'tiktok').map((track) => {
             const prog = downloadProgress[track.id];
-            const isDown = prog && prog.stage !== 'ready' && prog.stage !== 'idle';
+            const isDown = prog && prog.stage !== 'ready' && prog.stage !== 'idle' && prog.stage !== 'error';
+            const isError = prog?.stage === 'error';
+            const pendingSave = prog?.stage === 'ready' ? prog.pendingSave : undefined;
 
             return (
               <div
@@ -527,12 +523,19 @@ export const DiscoverTab: React.FC = () => {
                     <Play className="w-3.5 h-3.5 fill-current" />
                   </button>
                   <button
-                    onClick={() => downloadTrack(track)}
-                    disabled={Boolean(isDown)}
+                    onClick={() => {
+                      if (pendingSave) {
+                        triggerPendingSave(pendingSave);
+                        clearDownloadProgress(track.id);
+                      } else {
+                        downloadTrack(track);
+                      }
+                    }}
+                    disabled={pendingSave ? false : Boolean(isDown)}
                     className="p-2 rounded-lg bg-white/5 hover:bg-cyan-500/20 text-slate-400 hover:text-cyan-300 transition-colors"
-                    title="Download MP3"
+                    title={pendingSave ? 'Tap to save downloaded file' : isError ? 'Download failed — tap to retry' : 'Download MP3'}
                   >
-                    <Download className={`w-3.5 h-3.5 ${isDown ? 'animate-bounce text-cyan-400' : ''}`} />
+                    <Download className={`w-3.5 h-3.5 ${pendingSave ? 'animate-pulse text-amber-400' : isError ? 'text-red-400' : isDown ? 'animate-bounce text-cyan-400' : ''}`} />
                   </button>
                 </div>
               </div>
@@ -556,7 +559,9 @@ export const DiscoverTab: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {CURATED_TRACKS.filter((t) => t.platform === 'youtube').map((track) => {
             const prog = downloadProgress[track.id];
-            const isDown = prog && prog.stage !== 'ready' && prog.stage !== 'idle';
+            const isDown = prog && prog.stage !== 'ready' && prog.stage !== 'idle' && prog.stage !== 'error';
+            const isError = prog?.stage === 'error';
+            const pendingSave = prog?.stage === 'ready' ? prog.pendingSave : undefined;
 
             return (
               <div
@@ -598,12 +603,19 @@ export const DiscoverTab: React.FC = () => {
                     <Play className="w-3.5 h-3.5 fill-current" />
                   </button>
                   <button
-                    onClick={() => downloadTrack(track)}
-                    disabled={Boolean(isDown)}
+                    onClick={() => {
+                      if (pendingSave) {
+                        triggerPendingSave(pendingSave);
+                        clearDownloadProgress(track.id);
+                      } else {
+                        downloadTrack(track);
+                      }
+                    }}
+                    disabled={pendingSave ? false : Boolean(isDown)}
                     className="p-2 rounded-lg bg-white/5 hover:bg-pink-500/20 text-slate-400 hover:text-pink-300 transition-colors"
-                    title="Download MP3"
+                    title={pendingSave ? 'Tap to save downloaded file' : 'Download MP3'}
                   >
-                    <Download className={`w-3.5 h-3.5 ${isDown ? 'animate-bounce text-pink-400' : ''}`} />
+                    <Download className={`w-3.5 h-3.5 ${pendingSave ? 'animate-pulse text-amber-400' : isDown ? 'animate-bounce text-pink-400' : ''}`} />
                   </button>
                 </div>
               </div>

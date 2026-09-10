@@ -11,12 +11,13 @@ import {
   Check,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { triggerPendingSave } from '../services/demuxer';
 import { searchTracks, SPONSORED_ITEMS } from '../services/extractor';
 import { Track } from '../types';
 import { SponsoredCard } from './SponsoredCard';
 
 export const SearchTab: React.FC = () => {
-  const { playTrack, downloadTrack, downloadProgress, addToQueue } = useApp();
+  const { playTrack, downloadTrack, downloadProgress, clearDownloadProgress, addToQueue } = useApp();
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
   const [results, setResults] = useState<Track[]>([]);
@@ -126,7 +127,9 @@ export const SearchTab: React.FC = () => {
       <div className="space-y-2.5">
         {results.map((track, idx) => {
           const prog = downloadProgress[track.id];
-          const isDown = prog && prog.stage !== 'ready' && prog.stage !== 'idle';
+          const isDown = prog && prog.stage !== 'ready' && prog.stage !== 'idle' && prog.stage !== 'error';
+          const isError = prog?.stage === 'error';
+          const pendingSave = prog?.stage === 'ready' ? prog.pendingSave : undefined;
           const isAdded = addedIds[track.id];
 
           return (
@@ -188,12 +191,19 @@ export const SearchTab: React.FC = () => {
 
                   {/* Direct Download MP3 */}
                   <button
-                    onClick={() => downloadTrack(track)}
-                    disabled={Boolean(isDown)}
+                    onClick={() => {
+                      if (pendingSave) {
+                        triggerPendingSave(pendingSave);
+                        clearDownloadProgress(track.id);
+                      } else {
+                        downloadTrack(track);
+                      }
+                    }}
+                    disabled={pendingSave ? false : Boolean(isDown)}
                     className="p-2 rounded-xl bg-white/5 hover:bg-pink-500/20 text-slate-300 hover:text-pink-300 border border-white/10 transition-all active:scale-95 disabled:opacity-50"
-                    title="Download MP3"
+                    title={pendingSave ? 'Tap to save downloaded file' : isError ? 'Download failed — tap to retry' : 'Download MP3'}
                   >
-                    <Download className={`w-4 h-4 ${isDown ? 'animate-bounce text-pink-400' : ''}`} />
+                    <Download className={`w-4 h-4 ${pendingSave ? 'animate-pulse text-amber-400' : isError ? 'text-red-400' : isDown ? 'animate-bounce text-pink-400' : ''}`} />
                   </button>
 
                   {/* Instant Play */}

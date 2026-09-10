@@ -97,6 +97,8 @@ interface AppContextType {
   downloadTrack: (track: Track) => Promise<void>;
   cacheOffline: (track: Track) => Promise<void>;
   removeOfflineCache: (trackId: string) => Promise<void>;
+  /** Dismiss a persisted download-progress entry (e.g. after a mobile 'Tap to save'). */
+  clearDownloadProgress: (trackId: string) => void;
   createNewPlaylist: (name: string, description: string) => Promise<Playlist>;
   deletePlaylistById: (id: string) => Promise<void>;
   addTrackToPlaylistId: (playlistId: string, trackId: string) => Promise<void>;
@@ -487,10 +489,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const downloadTrack = async (track: Track) => {
-    await downloadAudioDirectly(track, (progress) => {
+    let hasPendingSave = false;
+    let errorOccurred = false;
+    const result = await downloadAudioDirectly(track, (progress) => {
+      if (progress.pendingSave) hasPendingSave = true;
+      if (progress.stage === 'error') errorOccurred = true;
       setDownloadProgress((prev) => ({ ...prev, [track.id]: progress }));
     });
     await refreshLibrary();
+    if (hasPendingSave) return; // Keep the 'Tap to save' button until the user acts
+    if (errorOccurred || !result.success) {
+      // Clear error immediately so the button re-enables for retry
+      setTimeout(() => {
+        setDownloadProgress((prev) => {
+          const next = { ...prev };
+          delete next[track.id];
+          return next;
+        });
+      }, 1500);
+      return;
+    }
     setTimeout(() => {
       setDownloadProgress((prev) => {
         const next = { ...prev };
@@ -498,6 +516,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return next;
       });
     }, 3000);
+  };
+
+  const clearDownloadProgress = (trackId: string) => {
+    setDownloadProgress((prev) => {
+      const next = { ...prev };
+      delete next[trackId];
+      return next;
+    });
   };
 
   const cacheOffline = async (track: Track) => {
@@ -638,6 +664,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         downloadTrack,
         cacheOffline,
         removeOfflineCache,
+        clearDownloadProgress,
         createNewPlaylist,
         deletePlaylistById,
         addTrackToPlaylistId,

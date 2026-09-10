@@ -102,6 +102,10 @@ export interface DemuxProgress {
   bytesLoaded: number;
   totalBytes: number;
   message: string;
+  /** Set on mobile when the blob is ready but the native download must be
+   *  triggered inside a real 'Tap to save' user gesture (Chrome Android blocks
+   *  programmatic <a download> clicks fired after async work). */
+  pendingSave?: { blobUrl: string; filename: string };
 }
 
 export interface StorageInfo {

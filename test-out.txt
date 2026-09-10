@@ -1,0 +1,533 @@
+▶ A1 androidSetup pure helpers
+  ✔ isAndroidDevice detects Android UAs only (159.0866ms)
+  ✔ buildSetupCommand returns the copy-paste one-liner pointing at Pages (1.2314ms)
+  ✔ shouldShowSetupCard truth table (0.8184ms)
+✔ A1 androidSetup pure helpers (164.1788ms)
+▶ A2 failure-path wiring shows the card instead of a dead end
+  ✔ extractor failure message stays honest and DiscoverTab renders setup card on android (1.804ms)
+✔ A2 failure-path wiring shows the card instead of a dead end (2.267ms)
+▶ DP0 source purity (CF-compat) is kept
+  ✔ worker files stay free of Node builtins / CJS artifacts (22.7623ms)
+✔ DP0 source purity (CF-compat) is kept (25.3613ms)
+▶ DP1 fetchWatchTitle
+  ✔ module exports the pivot contract (11.5234ms)
+  ✔ strips " - YouTube" and " - Topic" from the watch <title> (18.3555ms)
+  ✔ handles a bare song title (9.2794ms)
+  ✔ returns null when nothing usable remains (4.0876ms)
+  ✔ returns null on fetch failure (never throws) (3.6928ms)
+✔ DP1 fetchWatchTitle (48.024ms)
+▶ DP2 searchStandardDouble
+  ✔ parses WEB search JSON into a ranked candidate list (7.6591ms)
+  ✔ never throws; empty array on failure (9.823ms)
+✔ DP2 searchStandardDouble (18.1658ms)
+▶ DP3 pickDoubleCandidate
+  ✔ favours lyric/official near-original-duration non-Topic over noise (7.5889ms)
+  ✔ null on empty input (4.5989ms)
+✔ DP3 pickDoubleCandidate (12.6044ms)
+▶ DP4 extractWithDoublePivot (mocked network)
+  ✔ primary mint wins when it works (no double, no extra fetch) (5.1159ms)
+  ✔ blocked primary -> watch title -> search -> candidate mint (doubled) (15.6167ms)
+  ✔ prioritizeDouble skips the primary mint entirely (live probe hook) (23.8729ms)
+  ✔ null when pivot also fails (never throws) (15.5622ms)
+✔ DP4 extractWithDoublePivot (mocked network) (60.7951ms)
+▶ DP5 worker wiring
+  ✔ /resolve returns pivoted payload with doubled marker when primary blocked (107.4211ms)
+  ✔ /resolve happy path stays doubled:false (no marker) (5.4166ms)
+✔ DP5 worker wiring (113.1889ms)
+▶ DP6 LIVE — strict music id resolved via the pivot on the real network
+  ✔ vxUBYHz_q1I -> real watch title -> real search -> real signed googlevideo URL (2543.1192ms)
+✔ DP6 LIVE — strict music id resolved via the pivot on the real network (2543.546ms)
+▶ BL base-relative relay manifest URL
+  ✔ BL1 BASE_URL "/" keeps origin-absolute manifest URL (120.1377ms)
+  ✔ BL2 BASE_URL "./" resolves manifest under the GH Pages subpath (61.486ms)
+  ✔ BL3 no browser globals -> RELAY_MANIFEST_PATH fallback (41.3977ms)
+  ✔ BL4 probeRelayManifest uses resolved URL and returns healthy relay (43.9214ms)
+✔ BL base-relative relay manifest URL (270.6796ms)
+▶ CP Capacitor scaffold
+  ✔ CP1 capacitor config targets dist and android platform is scaffolded (2.5231ms)
+✔ CP Capacitor scaffold (2.9672ms)
+▶ C1 signer provider registered
+  ✔ normalizeSignerResponse is exported (91.3278ms)
+  ✔ PROVIDERS_YT contains a signer-kind entry on the live Pages endpoint (1.4227ms)
+✔ C1 signer provider registered (95.807ms)
+▶ C2 signer normalizer
+  ✔ parses the worker /resolve contract keys (1.0446ms)
+  ✔ error payloads and missing audioUrl normalize to null (0.7916ms)
+✔ C2 signer normalizer (2.3269ms)
+▶ C3 signer races like any provider
+  ✔ signer wins when healthy (2.7977ms)
+  ✔ signer down falls through to the next provider (no special-casing) (1.5135ms)
+  ✔ all providers failing (signer included) yields null (1.2285ms)
+✔ C3 signer races like any provider (6.3359ms)
+▶ C4 extractor direct-to-device wiring
+  ✔ signer source maps to cloudflare signer tier metadata + raw streamUrl (1.7321ms)
+✔ C4 extractor direct-to-device wiring (2.1355ms)
+▶ C5 contract parity — resolver normalizer reads worker output shape
+  ✔ normalizeSignerResponse parses exactly what worker core normalizeClientResponse emits (5.2112ms)
+✔ C5 contract parity — resolver normalizer reads worker output shape (5.52ms)
+▶ CF1 module surface
+  ✔ core exports the mint contract (11.6023ms)
+  ✔ worker exports the fetch contract + validVideoId (4.1812ms)
+✔ CF1 module surface (21.0576ms)
+▶ CF2 pickBestAudioFormat
+  ✔ picks highest-bitrate AUDIO stream that has a plain url (1.2096ms)
+  ✔ ignores url-less / signature-ciphered streams then null (0.7369ms)
+  ✔ null on empty / non-array input (0.9468ms)
+✔ CF2 pickBestAudioFormat (3.6271ms)
+▶ CF3 normalizeClientResponse
+  ✔ OK + details + stream parses into the signer payload (4.5257ms)
+  ✔ non-OK / LOGIN_REQUIRED / missing details -> null (0.8698ms)
+  ✔ ciphered-only streams (no plain url) -> null, honest no-decrypt (0.7062ms)
+✔ CF3 normalizeClientResponse (6.891ms)
+▶ CF4 Cloudflare-compatible source (purity)
+  ✔ worker files contain no Node builtin imports / CJS artifacts (4.1141ms)
+  ✔ both worker files import clean as WebStandards ESM (load aborts on any Node dep) (1.2433ms)
+  ✔ mintSignedUrl races injected clients/fetch — first usable wins, all-fail null (2.0718ms)
+✔ CF4 Cloudflare-compatible source (purity) (8.023ms)
+▶ CF5 worker routing
+  ✔ validVideoId accepts video ids, rejects junk (0.8914ms)
+  ✔ OPTIONS 204 + CORS, /vibecheck 200, bad method/path 405/404 (86.9504ms)
+  ✔ /resolve validation + happy path (global fetch stubbed) (8.4959ms)
+✔ CF5 worker routing (96.8103ms)
+▶ CF6 live smoke — deployed signer
+  ✔ https://vibecatch-signer.pages.dev answers vibecheck + resolve + CORS (1805.1389ms)
+✔ CF6 live smoke — deployed signer (1805.5148ms)
+▶ CS1 /stream proxies signed CDN bytes with CORS *
+  ✔ returns upstream bytes, status, contentType + Access-Control-Allow-Origin:* (89.7861ms)
+  ✔ never buffers into a 1MiB window — full-length relay written to response (18.3572ms)
+✔ CS1 /stream proxies signed CDN bytes with CORS * (111.824ms)
+▶ CS2 Range passthrough (seekable/partial)
+  ✔ forwards the client Range upstream; relays 206 + content-range + expose-headers (2.9772ms)
+✔ CS2 Range passthrough (seekable/partial) (3.3808ms)
+▶ CS3/CS4 input validation (mirrors node /stream rules)
+  ✔ missing url param -> 400 (2.0394ms)
+  ✔ non-http(s) upstream (file://) -> 400 (3.2403ms)
+  ✔ upstream 4xx -> 502 JSON (never hangs, hones error) (2.8837ms)
+✔ CS3/CS4 input validation (mirrors node /stream rules) (9.1158ms)
+▶ CS5 existing signer routes unchanged (regression)
+  ✔ OPTIONS -> 204 + CORS (1.4889ms)
+  ✔ /vibecheck still answers ok:true (name vibecatch-cf-signer) (1.6321ms)
+✔ CS5 existing signer routes unchanged (regression) (3.7973ms)
+▶ CS6 PWA download path is cloud-only (zero laptop)
+  ✔ demuxer discoverRelayBase returns the always-on cloud signer base (3.0534ms)
+  ✔ fetchUrlForDownload wraps a direct googlevideo URL into cloud /stream (81.7777ms)
+✔ CS6 PWA download path is cloud-only (zero laptop) (85.6181ms)
+▶ UR1 default upstream Range for full-file download
+  ✔ client sends NO Range -> worker forwards Range: bytes=0- upstream (81.906ms)
+  ✔ client DOES send Range -> that exact Range forwarded (no default override) (3.185ms)
+  ✔ relayed 206 (from default full-range) exposes content-range to the browser (9.2087ms)
+✔ UR1 default upstream Range for full-file download (97.1841ms)
+▶ C1 fetchUrlForDownload wraps direct CDN through a CORS relay
+  ✔ direct googlevideo URL is wrapped into relay /stream?url=... (95.6416ms)
+  ✔ already-relay source is returned verbatim (no double-wrap) (1.0798ms)
+  ✔ track.downloadUrl wins when it is a relay /download endpoint (0.8432ms)
+  ✔ direct source with NO relay base throws a clear CORS-safe error (1.749ms)
+  ✔ non-direct, non-relay stream (plain https) still returns itself (0.6973ms)
+✔ C1 fetchUrlForDownload wraps direct CDN through a CORS relay (103.5002ms)
+▶ C2 demuxer download path is wired through the CORS-safe builder
+  ✔ demuxer.ts imports + calls fetchUrlForDownload, never raw fetch(track.streamUrl) in download (3.4071ms)
+  ✔ downloadUrl.ts still routes streamUrl when no direct-vs-relay decision needed (0.9833ms)
+✔ C2 demuxer download path is wired through the CORS-safe builder (5.1634ms)
+[vibecatch-local-node] listening on http://127.0.0.1:0
+▶ G1 full download through windowed relay
+  ✔ no client range -> 200 stitched whole file (windows of <=1MiB) (146.1823ms)
+  ✔ open-ended client range -> 206 from offset to end (23.6289ms)
+✔ G1 full download through windowed relay (189.061ms)
+[vibecatch-local-node] listening on http://127.0.0.1:0
+▶ G2 arbitrary mid-offset client range
+  ✔ bounded client range is served exactly after auto-prime (29.6484ms)
+✔ G2 arbitrary mid-offset client range (30.2795ms)
+▶ G3 window planner (pure helper)
+  ✔ planWindows covers span with each window <= limit (2.2452ms)
+  ✔ parseRangeHeader handles bounded, open-ended and absent (0.5426ms)
+✔ G3 window planner (pure helper) (3.287ms)
+▶ G4 non-gated hosts keep simple passthrough
+  ✔ plain upstream relays without UA/window logic (26.7776ms)
+✔ G4 non-gated hosts keep simple passthrough (33.9617ms)
+▶ N1 node script exists + contract exports
+  ✔ vibecatch-node.mjs exists and exports pure helpers (1.4964ms)
+✔ N1 node script exists + contract exports (3.1491ms)
+▶ N2 audio format selection
+  ✔ picks highest-bitrate AUDIO-only stream, ignores video + ciphered (0.4468ms)
+  ✔ empty/unusable list -> null (0.3342ms)
+✔ N2 audio format selection (1.1073ms)
+▶ N3 InnerTube response normalization
+  ✔ OK status + adaptiveFormats -> resolved payload (0.6906ms)
+  ✔ non-OK playability -> null with reason surfaced (0.2607ms)
+  ✔ signatureCipher-only (no plain urls) -> null (honest v1 limit) (0.458ms)
+✔ N3 InnerTube response normalization (1.9701ms)
+▶ N4 CORS + private network headers (browser PWA can call localhost)
+  ✔ headers include ACAO:* and ACAPN:true (0.9359ms)
+✔ N4 CORS + private network headers (browser PWA can call localhost) (1.4693ms)
+▶ RT1 tryResolveOnPort times out a hanging /resolve
+  ✔ hung /resolve returns null within ~4s (does not hang forever) (5102.5581ms)
+✔ RT1 tryResolveOnPort times out a hanging /resolve (5105.8008ms)
+▶ RT2 fast /resolve still resolves inside the budget
+  ✔ a port whose /resolve answers in 300ms returns its audio (21.2723ms)
+✔ RT2 fast /resolve still resolves inside the budget (21.9712ms)
+▶ RT3 all ports hang -> null (extractor falls through)
+  ✔ resolveViaLocalNode returns null when every DEFAULT_PORT /resolve hangs (5029.0945ms)
+✔ RT3 all ports hang -> null (extractor falls through) (5029.8228ms)
+[vibecatch-local-node] listening on http://127.0.0.1:0
+(node:2208) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+▶ L1 local node solves n-challenges (--js-runtimes node in argv)
+  ✔ cold /download argv includes --js-runtimes node (202.6878ms)
+✔ L1 local node solves n-challenges (--js-runtimes node in argv) (219.8993ms)
+▶ L2 SABR-proof client chain in local-node argv
+  ✔ argv carries youtube:player_client=mweb,tv_simply (240.6086ms)
+✔ L2 SABR-proof client chain in local-node argv (241.3102ms)
+▶ L3 VIBECATCH_POT_URL override + disable semantics (worker parity)
+  ✔ override URL lands in argv (219.5815ms)
+  ✔ empty string disables BOTH extractor-args (176.6274ms)
+✔ L3 VIBECATCH_POT_URL override + disable semantics (worker parity) (397.0836ms)
+▶ OR1 fetchOembedInfo
+  ✔ module exports the oembed contract (5.899ms)
+  ✔ parses oembed JSON into {title, artist} and strips " - Topic" (8.6209ms)
+  ✔ keeps a non-Topic author untouched (13.0119ms)
+  ✔ null on failed / non-ok responses (never throws) (6.4212ms)
+✔ OR1 fetchOembedInfo (38.0976ms)
+▶ OR2 extractWithDoublePivot oembed fallback
+  ✔ unusable watch title -> oembed title -> search -> first mintable candidate (46.858ms)
+  ✔ good watch title still wins when oembed is unavailable (9.4348ms)
+✔ OR2 extractWithDoublePivot oembed fallback (57.0158ms)
+▶ OR3 artist-aware ranking
+  ✔ artistName strongly prefers the matching-artist candidate (9.4422ms)
+  ✔ without artistName legacy ranking is unchanged (lyric still top) (7.6265ms)
+✔ OR3 artist-aware ranking (17.8213ms)
+▶ OR4 multi-candidate mint
+  ✔ pivot tries candidates until one mints (first candidate fails) (9.5596ms)
+✔ OR4 multi-candidate mint (9.8833ms)
+▶ DDL1 overall deadline bound
+  ✔ fully-blocked window returns within ~2x timeout (no unbounded hang) (2146.31ms)
+  ✔ candidate-loop exhaustion is bounded even when mints reject instantly (20 candidates) (25.8873ms)
+✔ DDL1 overall deadline bound (2174.6457ms)
+▶ DDL2 success inside budget still wins
+  ✔ a mintable candidate resolves within the deadline (5.9061ms)
+✔ DDL2 success inside budget still wins (6.2068ms)
+▶ DDL3 oembed-first enriches artist even when watch title resolves
+  ✔ ranking uses oembed artist so the right track wins end-to-end (5.874ms)
+✔ DDL3 oembed-first enriches artist even when watch title resolves (6.1247ms)
+[vibecatch-local-node] listening on http://127.0.0.1:0
+(node:12072) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[vibecatch-local-node] listening on http://127.0.0.1:0
+▶ PC1 /download caches per videoId (tee) and re-serves from disk
+  ✔ cold: pipes payload AND leaves cached file; exactly 1 spawn (217.6436ms)
+✔ PC1 /download caches per videoId (tee) and re-serves from disk (252.4434ms)
+▶ PC2 pre-seeded cache serves instantly + Range works
+  ✔ full serve from disk, zero spawns (10.0931ms)
+[vibecatch-local-node] listening on http://127.0.0.1:0
+  ✔ Range bytes=10-19 -> 206 slice + Content-Range + Accept-Ranges (6.9828ms)
+✔ PC2 pre-seeded cache serves instantly + Range works (27.0563ms)
+▶ PC3 /cache-status reports cache state
+  ✔ cached:true + size for known id; cached:false otherwise (10.7158ms)
+✔ PC3 /cache-status reports cache state (17.4802ms)
+▶ PC4 ensureCached prefills cache without an HTTP download call
+  ✔ direct call fills cache once, dedupes concurrent calls (166.6215ms)
+✔ PC4 ensureCached prefills cache without an HTTP download call (167.1954ms)
+▶ PW1 PWA playback prefers node /download over capped /stream
+  ✔ downloadUrl.ts exports playbackSourceFor with blob > downloadUrl > streamUrl (50.3756ms)
+  ✔ getPlayableAudioUrl routes through playbackSourceFor (no raw streamUrl fallback) (2.458ms)
+✔ PW1 PWA playback prefers node /download over capped /stream (53.5608ms)
+▶ P1 localNode probe contract
+  ✔ detects node on a port via stubbed fetch; null when absent; never throws (55.7241ms)
+  ✔ wrong name payload is rejected (1.0717ms)
+✔ P1 localNode probe contract (58.8207ms)
+▶ P2 resolveViaLocalNode mapping
+  ✔ /resolve JSON -> ResolvedAudio with source=local-node; error -> null (1.6522ms)
+✔ P2 resolveViaLocalNode mapping (1.9297ms)
+▶ P3 extractor integration — local node tried BEFORE public race
+  ✔ extractor.ts wires localNode first inside extractYouTube3Tier (1.2217ms)
+✔ P3 extractor integration — local node tried BEFORE public race (1.4779ms)
+▶ P4 Settings UI exposes Local Node panel
+  ✔ SettingsTab mentions Local Node + download + run instructions (1.5042ms)
+✔ P4 Settings UI exposes Local Node panel (1.7666ms)
+▶ P5 site serves the node script publicly
+  ✔ public/vibecatch-node.mjs exists and matches root script bytes (2.0234ms)
+✔ P5 site serves the node script publicly (2.3411ms)
+▶ RF1 buildRelayDownloadUrl uses the relay base (https)
+  ✔ builds /download on the given base with encoded params (50.9104ms)
+✔ RF1 buildRelayDownloadUrl uses the relay base (https) (52.8975ms)
+▶ RF2 probeRelayManifest discovers a healthy relay
+  ✔ returns { baseUrl } for a healthy /vibecheck entry (15.173ms)
+✔ RF2 probeRelayManifest discovers a healthy relay (15.8673ms)
+▶ RF3 resolveViaRelay resolves against a relay base
+  ✔ returns ResolvedAudio with baseUrl + source relay (14.7793ms)
+✔ RF3 resolveViaRelay resolves against a relay base (15.4513ms)
+▶ RF4 extractor wires the relay fallback through the pool
+  ✔ extractor.ts resolves via the relay POOL and builds relay /stream URLs (1.6469ms)
+✔ RF4 extractor wires the relay fallback through the pool (1.9807ms)
+▶ RG1 pool fails over from a resolve-dead relay to the next healthy one
+  ✔ first vibe-healthy relay 502s on /resolve; pool resolves via the second (70.5877ms)
+✔ RG1 pool fails over from a resolve-dead relay to the next healthy one (73.1553ms)
+▶ RG2 pool tolerates a slow relay resolve (>1200ms)
+  ✔ relay whose /resolve answers in 1600ms still resolves (old timeout would abort) (1635.2619ms)
+✔ RG2 pool tolerates a slow relay resolve (>1200ms) (1635.8328ms)
+▶ RG3 pool keeps manifest ordering: first healthy resolver wins
+  ✔ when both relays resolve, the first is used (25.5264ms)
+✔ RG3 pool keeps manifest ordering: first healthy resolver wins (26.1218ms)
+▶ RG4 extractor wires the pool + buildRelayStreamUrl for relay tracks
+  ✔ uses resolveViaRelayPool and sets streamUrl/downloadUrl to the relay /stream proxy (1.7435ms)
+✔ RG4 extractor wires the pool + buildRelayStreamUrl for relay tracks (2.1205ms)
+▶ RG5 downloadUrl passthrough for relay /stream URLs
+  ✔ fetchUrlForDownload returns the trycloudflare /stream URL unchanged (25.3523ms)
+✔ RG5 downloadUrl passthrough for relay /stream URLs (26.0994ms)
+▶ RG6 pool returns null when every relay resolve fails (never throws)
+  ✔ all vibe-healthy relays 502 -> null (22.7821ms)
+✔ RG6 pool returns null when every relay resolve fails (never throws) (23.3338ms)
+▶ RG7 pool discovers a relay whose /vibecheck is slow (>1200ms)
+  ✔ vibecheck answering in 1600ms is still treated as healthy (1641.9249ms)
+✔ RG7 pool discovers a relay whose /vibecheck is slow (>1200ms) (1642.4233ms)
+▶ W1 tunnel log URL extraction (pure)
+  ✔ parses the cloudflared banner URL line (6.8584ms)
+  ✔ returns null when no URL is present yet (tunnel still registering) (1.1497ms)
+✔ W1 tunnel log URL extraction (pure) (9.8763ms)
+▶ W2 probe classification (pure)
+  ✔ healthy remap: 200 + ok:true + name matching vibecatch (0.697ms)
+  ✔ unhealthy: non-200, ok:false, or name mismatch (0.4535ms)
+✔ W2 probe classification (pure) (1.5452ms)
+▶ W3 pool assembly + unchanged detection (pure)
+  ✔ builds the /vibecheck pool entries with https prefix (1.6791ms)
+  ✔ pool unchanged helper compares arrays by value (0.6408ms)
+✔ W3 pool assembly + unchanged detection (pure) (4.274ms)
+▶ W4 relay role model (who should respawn)
+  ✔ healthy remote+local => role stays healthy (0.6236ms)
+  ✔ remote dead but local alive => tunnel needs respawn (once threshold reached) (0.41ms)
+  ✔ local dead (both fail) => respawn the local service first (0.424ms)
+  ✔ missing url entirely => needs tunnel respawn immediately (0.3587ms)
+✔ W4 relay role model (who should respawn) (2.3383ms)
+▶ W5 state persistence (survives daemon restart)
+  ✔ round-trips role state through JSON on disk (4.0224ms)
+✔ W5 state persistence (survives daemon restart) (4.2089ms)
+▶ W6 hostname/URL validators (avoid corrupting pool)
+  ✔ acceptances: cloudflared + custom relay hostnames (0.6449ms)
+  ✔ rejections: http, non-https scheme, empty, garbage (0.3489ms)
+✔ W6 hostname/URL validators (avoid corrupting pool) (1.2591ms)
+▶ W7 git invocations always carry alliance identity (fresh clones have no config)
+  ✔ gitCommand prefixes -c user.name/email on commit paths (0.7432ms)
+  ✔ every gitCommand positional keeps repoDir as -C target (0.4568ms)
+✔ W7 git invocations always carry alliance identity (fresh clones have no config) (1.4831ms)
+▶ W8 loop builds the pool from POST-respawn URLs (never stale)
+  ✔ respawned role url is what the loop deploys, registered URL is what probe sees (0.767ms)
+  ✔ roleUrls drops roles with no URL (empty before tunnel registers) (0.3365ms)
+✔ W8 loop builds the pool from POST-respawn URLs (never stale) (1.444ms)
+[vibecatch-remote-worker] listening on http://127.0.0.1:0
+▶ R1 worker identity + CORS (browser-reachable from any origin)
+  ✔ /vibecheck identifies as vibecatch-remote-worker (21.535ms)
+  ✔ OPTIONS preflight answered for private-network-less cross-origin GETs (4.5664ms)
+✔ R1 worker identity + CORS (browser-reachable from any origin) (37.3874ms)
+(node:6412) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+▶ R2 /resolve returns honest metadata via yt-dlp --dump-json
+  ✔ metadata shape (130.1795ms)
+  ✔ yt-dlp failure -> honest 502 JSON, never fabricated data (2.761ms)
+✔ R2 /resolve returns honest metadata via yt-dlp --dump-json (133.5866ms)
+▶ R3 /download pipes FULL audio bytes through the worker
+  ✔ streams bytes with attachment disposition + content-type (135.9797ms)
+  ✔ supports Range passthrough (206) so phones can seek (7.0349ms)
+  ✔ failed spawn never poisons the cache and returns 502 (3.071ms)
+✔ R3 /download pipes FULL audio bytes through the worker (146.7917ms)
+▶ R4 disk cache serves warm requests without re-spawning
+  ✔ second identical download is served from cache (spawn count stable) (130.0356ms)
+✔ R4 disk cache serves warm requests without re-spawning (130.4999ms)
+▶ R5 workers.json manifest exists for the client pool
+  ✔ public/workers.json is a valid JSON array of https URLs (2.0821ms)
+✔ R5 workers.json manifest exists for the client pool (2.3466ms)
+▶ R6 cookie jar reaches yt-dlp (bot-wall bypass on datacenter IPs)
+  ✔ cold /download argv includes --cookies pointing at an existing Netscape jar (139.6979ms)
+  ✔ /resolve argv also carries --cookies (metadata hits the same wall) (208.838ms)
+✔ R6 cookie jar reaches yt-dlp (bot-wall bypass on datacenter IPs) (349.0956ms)
+▶ R7 SABR-proof client chain reaches yt-dlp argv
+  ✔ cold /download argv requests player_client=mweb,tv_simply (184.0743ms)
+✔ R7 SABR-proof client chain reaches yt-dlp argv (184.4956ms)
+[vibecatch-remote-worker] listening on http://127.0.0.1:0
+▶ R8 GVS PO-token provider wired via bgutil HTTP plugin
+  ✔ default POT base_url http://127.0.0.1:4416 present in download argv (156.1204ms)
+[vibecatch-remote-worker] listening on http://127.0.0.1:0
+  ✔ VIBECATCH_POT_URL override respected; empty string disables POT+client args (363.3799ms)
+✔ R8 GVS PO-token provider wired via bgutil HTTP plugin (520.0162ms)
+▶ R9 no CommonJS require() in ESM worker source
+  ✔ worker source never calls require( (1.824ms)
+✔ R9 no CommonJS require() in ESM worker source (2.0572ms)
+✔ harness sanity (2.0342ms)
+▶ SIG1 normalizeSignerResponse accepts the LIVE worker shape (Bug A)
+  ✔ payload WITHOUT ok:true (real worker response) must normalize (117.7737ms)
+  ✔ race resolves a 200 signer response WITHOUT ok:true (real happy path) (53.7725ms)
+  ✔ documents: worker payload must not include a garbage `ok:false` (47.6598ms)
+✔ SIG1 normalizeSignerResponse accepts the LIVE worker shape (Bug A) (222.5557ms)
+▶ SIG2 strict 502 marker read even beyond the base race timeout (Bug B)
+  ✔ signer 502 marker arrives AFTER base timeout but within extended signer window -> strictTrackSignal true (229.8939ms)
+  ✔ fast strict-502 still signals (no regression) (52.215ms)
+  ✔ signer unreachable -> no false strict flag, still resolves cable provider (44.61ms)
+✔ SIG2 strict 502 marker read even beyond the base race timeout (Bug B) (327.6097ms)
+[vibecatch-local-node] listening on http://127.0.0.1:0
+▶ S1 /stream relays googlevideo bytes to the browser
+  ✔ proxies body + sets Content-Disposition + CORS, no buffering (87.1428ms)
+  ✔ passes through Range -> 206 + Content-Range (14.6447ms)
+  ✔ upstream failure -> 502 honest error (never hangs) (23.943ms)
+  ✔ missing url param -> 400 (5.226ms)
+  ✔ rejects non-http(s) url (SSRF guard) (4.0786ms)
+✔ S1 /stream relays googlevideo bytes to the browser (160.9376ms)
+▶ W1 pure stream-url builder
+  ✔ buildLocalStreamUrl wraps upstream url in localhost /stream relay (109.5578ms)
+✔ W1 pure stream-url builder (112.5894ms)
+▶ W2 resolveViaLocalNode is port-aware
+  ✔ probes DEFAULT_PORTS and returns which port answered; explicit port still honored (66.0649ms)
+✔ W2 resolveViaLocalNode is port-aware (66.7741ms)
+▶ W3 extractor routes local-node audio through /stream relay
+  ✔ track.streamUrl is the localhost /stream url, never raw googlevideo (66.6236ms)
+✔ W3 extractor routes local-node audio through /stream relay (67.3382ms)
+▶ S1 resolver race strict-track signal
+  ✔ signer 502 + marker body -> strictTrackSignal true, resolved null (70.4804ms)
+  ✔ signer 502 with a DIFFERENT body -> no false positive (54.766ms)
+  ✔ strict marker on non-502 status -> signal stays false (50.7769ms)
+  ✔ still resolves normally when a later provider succeeds (48.8067ms)
+  ✔ legacy raceYouTubeResolvers contract untouched (52.5887ms)
+✔ S1 resolver race strict-track signal (281.0394ms)
+▶ S2 extractor failure result is honest + retryable (no APK gate)
+  ✔ buildAllProvidersFailedResult(true) -> honest error, NO requiresNativeApp flag (67.1203ms)
+  ✔ buildAllProvidersFailedResult(false) -> generic busy message, no flag (23.6967ms)
+  ✔ wiring: extractor.ts uses signal diagnostics + DiscoverTab routes failures to retry copy (1.485ms)
+✔ S2 extractor failure result is honest + retryable (no APK gate) (93.1172ms)
+▶ S3 no native-app card dead-end in the UI
+  ✔ androidSetup.buildStrictTrackError is gone (APK gate removed) (11.8415ms)
+  ✔ DiscoverTab offers an honest retry, no APK path (0.9715ms)
+✔ S3 no native-app card dead-end in the UI (13.2633ms)
+▶ T1 termux-setup.sh exists as static asset
+  ✔ public/termux-setup.sh exists and is non-trivial (2.1959ms)
+✔ T1 termux-setup.sh exists as static asset (4.6725ms)
+▶ T2 script installs the right Termux-native stack
+  ✔ installs nodejs LTS + ffmpeg via pkg (no sudo/apt) (1.0367ms)
+  ✔ installs yt-dlp via pip (ARM-safe), not an x86 binary download (0.4913ms)
+  ✔ acquires wake-lock so Android doze does not kill downloads (0.3398ms)
+✔ T2 script installs the right Termux-native stack (2.5053ms)
+▶ T3 script fetches and launches the real node
+  ✔ downloads vibecatch-node.mjs from the Pages origin (0.5565ms)
+  ✔ launches detached (nohup/background) on default port 8794 (0.4482ms)
+  ✔ verifies the running node via /vibecheck identity (0.4255ms)
+✔ T3 script fetches and launches the real node (2.5824ms)
+▶ T4 idempotent + re-runnable
+  ✔ skips already-installed pieces (command -v / existence guards) (0.9176ms)
+  ✔ ships a start-node.sh so users can relaunch after reboot (0.7756ms)
+✔ T4 idempotent + re-runnable (2.4092ms)
+▶ TS1 isDirectStreamUrl
+  ✔ googlevideo.com host is DIRECT (79.0393ms)
+  ✔ relay tunnel host is NOT direct (21.8391ms)
+  ✔ localhost relay is NOT direct (19.0087ms)
+✔ TS1 isDirectStreamUrl (123.1342ms)
+▶ TS2 playbackSourceFor prefers direct stream over relay download
+  ✔ direct streamUrl beats relay downloadUrl (thin signer ordering) (16.9585ms)
+  ✔ relay-wrapped streamUrl keeps legacy download > stream ordering (PW1 compat) (20.6613ms)
+  ✔ blob still wins over everything (18.8683ms)
+  ✔ no downloadUrl -> falls back to streamUrl (11.8794ms)
+✔ TS2 playbackSourceFor prefers direct stream over relay download (69.59ms)
+▶ TS3 playbackChain ordered + deduped
+  ✔ direct track chains blob > direct > relay download (15.8771ms)
+  ✔ relay-wrapped chain orders download before stream (16.6381ms)
+  ✔ dedupes identical URLs in the chain (17.6071ms)
+✔ TS3 playbackChain ordered + deduped (51.2446ms)
+▶ TS4 extractor relay path routes through the relay POOL /stream proxy
+  ✔ relay branch wires streamUrl + downloadUrl via buildRelayStreamUrl (pool) (1.5565ms)
+✔ TS4 extractor relay path routes through the relay POOL /stream proxy (1.7966ms)
+▶ TS5 audioEngine direct-playback hygiene
+  ✔ does NOT hardcode crossOrigin anonymous on direct URLs (googlevideo has no ACAO) (1.911ms)
+  ✔ owns a one-shot error fallback to the relay URL (1.5187ms)
+✔ TS5 audioEngine direct-playback hygiene (3.7291ms)
+▶ TS6 resolveViaRelay keeps returning raw audioUrl (signer contract)
+  ✔ localNode.ts resolveViaRelay returns the minted audioUrl untouched (20.8783ms)
+✔ TS6 resolveViaRelay keeps returning raw audioUrl (signer contract) (21.3265ms)
+[vibecatch-local-node] listening on http://127.0.0.1:0
+(node:3288) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[vibecatch-local-node] listening on http://127.0.0.1:0
+▶ DT1 /download emits headers at the ~2s deadline (slow first byte)
+  ✔ headers arrive before 2600ms while stub sleeps 3000ms (3339.3147ms)
+✔ DT1 /download emits headers at the ~2s deadline (slow first byte) (3402.2308ms)
+▶ DT2 fail-fast before deadline still yields honest JSON 502
+  ✔ 502 JSON error body (headers not pre-empted by deadline on fail-fast) (59.9032ms)
+✔ DT2 fail-fast before deadline still yields honest JSON 502 (68.3473ms)
+▶ W1 downloadUrl pure helpers
+  ✔ buildLocalDownloadUrl targets node /download with encoded params (132.6563ms)
+  ✔ pickDownloadUrl prefers downloadUrl over streamUrl (1.1697ms)
+✔ W1 downloadUrl pure helpers (136.8901ms)
+▶ W2 extractor sets downloadUrl on local-node tracks
+  ✔ extractor.ts imports builder and assigns downloadUrl in local-node branch (2.0831ms)
+✔ W2 extractor sets downloadUrl on local-node tracks (2.5948ms)
+▶ W3 demuxer fetches CORS-safe download source for save + offline cache
+  ✔ demuxer.ts uses fetchUrlForDownload for downloadAudioDirectly + cacheTrackOffline (2.4361ms)
+  ✔ trimAudioSegment still routes through pickDownloadUrl (relay-only trimmer) (1.9739ms)
+  ✔ saved file extension + blob mime derive from track.audioFormat (1.8252ms)
+✔ W3 demuxer fetches CORS-safe download source for save + offline cache (7.0422ms)
+▶ W4 Track type carries optional downloadUrl
+  ✔ types/index.ts declares downloadUrl?: string (1.9882ms)
+✔ W4 Track type carries optional downloadUrl (2.5544ms)
+▶ A1 resolvers module exists with required exports
+  ✔ src/services/resolvers.ts exports the contract (134.2154ms)
+✔ A1 resolvers module exists with required exports (137.2499ms)
+▶ A2 provider race semantics
+  ✔ returns first successful provider result (4.9137ms)
+  ✔ all providers failing yields explicit failure (never a fabricated track) (2.4307ms)
+  ✔ slow provider skipped via per-provider timeout bound (1.4462ms)
+✔ A2 provider race semantics (9.667ms)
+▶ A3 normalizers
+  ✔ cobalt tunnel response normalized (0.8201ms)
+  ✔ piped audioStreams picks highest-bitrate AUDIO only (0.7555ms)
+  ✔ invidious adaptiveFormats picks best audio (0.8939ms)
+✔ A3 normalizers (3.1613ms)
+▶ A4 resolution cache (pure core, injectable KV, TTL, never throws)
+  ✔ roundtrip + expiry + hostile KV swallowed (1.6627ms)
+✔ A4 resolution cache (pure core, injectable KV, TTL, never throws) (2.2584ms)
+▶ A5 extractor integration — honest behavior replaces pixabay masquerade
+  ✔ extractor.ts wires raceYouTubeResolvers and drops the fake fallback (1.5357ms)
+✔ A5 extractor integration — honest behavior replaces pixabay masquerade (1.8348ms)
+[vibecatch-local-node] listening on http://127.0.0.1:0
+▶ B1 bootstrap creates default cookies.txt + passes --cookies
+  ✔ cookies.txt exists in stateDir after start (no explicit/env cookie) (2.5971ms)
+(node:8568) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+  ✔ /download argv includes --cookies <stateDir>/cookies.txt (201.4094ms)
+[vibecatch-local-node] listening on http://127.0.0.1:0
+  ✔ B2 /ytdlp-status reports cookiesAvailable:true (4.6155ms)
+✔ B1 bootstrap creates default cookies.txt + passes --cookies (239.2502ms)
+[vibecatch-local-node] listening on http://127.0.0.1:0
+▶ C2 explicit-but-missing cookiesPath disables bootstrap
+  ✔ no file created, no --cookies in argv (167.318ms)
+✔ C2 explicit-but-missing cookiesPath disables bootstrap (172.308ms)
+▶ E1 /download is a honest 502 when yt-dlp fails pre-audio
+  ✔ status 502 with JSON error body (55.7886ms)
+✔ E1 /download is a honest 502 when yt-dlp fails pre-audio (61.6709ms)
+[vibecatch-local-node] listening on http://127.0.0.1:0
+(node:3564) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+▶ C1 /download passes --cookies when file exists
+  ✔ argv includes --cookies <resolved path> (197.8542ms)
+  ✔ status endpoint reports cookie state (4.3871ms)
+✔ C1 /download passes --cookies when file exists (217.2633ms)
+▶ C2 no cookies file -> argv unchanged (no --cookies)
+  ✔ missing file is skipped silently (157.7627ms)
+✔ C2 no cookies file -> argv unchanged (no --cookies) (158.3591ms)
+[vibecatch-local-node] listening on http://127.0.0.1:0
+▶ Y1 status endpoint reports binary state
+  ✔ /ytdlp-status -> {available:true,path} when override provided (28.2068ms)
+  ✔ startServer accepts opts.ytdlpPath (contract) (0.6633ms)
+✔ Y1 status endpoint reports binary state (39.9208ms)
+(node:5876) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+▶ Y2 /download streams FULL audio via yt-dlp
+  ✔ pipes binary stdout with audio headers + disposition (200.4618ms)
+[vibecatch-local-node] listening on http://127.0.0.1:0
+  ✔ missing videoId -> 400 (2.8589ms)
+✔ Y2 /download streams FULL audio via yt-dlp (204.0671ms)
+▶ Y3 honest failure when no binary available
+  ✔ /download without usable binary -> 502 JSON error (never hangs) (5.638ms)
+  ✔ /ytdlp-status reports unavailable on second server too (6.0127ms)
+✔ Y3 honest failure when no binary available (18.6607ms)
+ℹ tests 239
+ℹ suites 127
+ℹ pass 239
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19734.2023

@@ -1,9 +1,8 @@
-// GUARDIAN TDD ENFORCER — strict-track fallback to native app (freebuff-task-20260830-apk-fallback)
+// GUARDIAN TDD ENFORCER — strict-track fallback to HONEST RETRY (freebuff-task-20260909-kill-apk-gate)
 // When the Cloudflare signer returns HTTP 502 { error: "all youtube clients failed for this video" }
-// (a high-security / client-gated track), the web extractor must NOT show the generic
-// "all free audio resolvers are busy" dead end. It must surface a silent, specific signal
-// to the UI: ExtractionResult.requiresNativeApp === true + copy pointing at the native
-// Android app APK (hosted on the same GitHub Pages repo).
+// (a client-gated/temporarily-blocked track), the web extractor must NOT push the
+// native-APK dead-end (the APK is a bare webview shell with zero native extraction).
+// It must surface an honest, retryable error to the UI instead.
 // Pure logic only — fetch stubbed, zero network.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -107,15 +106,15 @@ describe('S1 resolver race strict-track signal', () => {
   });
 });
 
-describe('S2 extractor failure result carries the strict-track flag', () => {
-  test('buildAllProvidersFailedResult(true) -> requiresNativeApp + native-app copy', async () => {
+describe('S2 extractor failure result is honest + retryable (no APK gate)', () => {
+  test('buildAllProvidersFailedResult(true) -> honest error, NO requiresNativeApp flag', async () => {
     const ex = await loadBundled('src/services/extractor.ts', 'extractor');
     assert.equal(typeof ex.buildAllProvidersFailedResult, 'function', 'missing export buildAllProvidersFailedResult');
     const res = ex.buildAllProvidersFailedResult(true);
     assert.equal(res.success, false);
-    assert.equal(res.requiresNativeApp, true, 'must flag requiresNativeApp on strict track');
-    assert.match(res.error, /native Android app/, 'error must mention the native Android app');
-    assert.match(res.error, /Download the APK here/i, 'error must contain the download callout');
+    assert.equal(res.requiresNativeApp, undefined, 'must NOT flag the native-APK dead-end');
+    assert.match(res.error, /YouTube blocked/i, 'error must explain the actual failure cause');
+    assert.match(res.error, /try again/i, 'error must point the user at a retry, not an APK');
   });
 
   test('buildAllProvidersFailedResult(false) -> generic busy message, no flag', async () => {
@@ -126,32 +125,27 @@ describe('S2 extractor failure result carries the strict-track flag', () => {
     assert.match(res.error, /busy or offline/i, 'keeps the existing honest busy message');
   });
 
-  test('wiring: extractor.ts uses the signal API + types carry requiresNativeApp', async () => {
+  test('wiring: extractor.ts uses signal diagnostics + DiscoverTab routes failures to retry copy', async () => {
     const src = fs.readFileSync(path.join(root, 'src', 'services', 'extractor.ts'), 'utf8');
     assert.match(src, /raceYouTubeResolversWithSignal/, 'npm resolver failure path must ask the race for its signal');
-    assert.match(src, /buildAllProvidersFailedResult/, 'failure branch must route through buildAllProvidersFailedResult');
-    const types = fs.readFileSync(path.join(root, 'src', 'types', 'index.ts'), 'utf8');
-    assert.match(types, /requiresNativeApp\??:\s*boolean/, 'ExtractionResult must type the requiresNativeApp flag');
+    assert.match(src, /strictTrackSignal/, 'strict-track marker is kept as a diagnostic signal');
+    const disc = fs.readFileSync(path.join(root, 'src', 'components', 'DiscoverTab.tsx'), 'utf8');
+    assert.match(disc, /Try again/, 'DiscoverTab must offer a retry instead of an APK download');
+    assert.doesNotMatch(disc, /Download the APK here/, 'DiscoverTab must NOT push the APK dead-end');
   });
 });
 
-describe('S3 native-app card copy + APK URL', () => {
-  test('androidSetup exports APK_DOWNLOAD_URL + buildStrictTrackError with exact copy', async () => {
+describe('S3 no native-app card dead-end in the UI', () => {
+  test('androidSetup.buildStrictTrackError is gone (APK gate removed)', async () => {
     const a = await loadBundled('src/services/androidSetup.ts', 'apksetup');
-    assert.equal(typeof a.APK_DOWNLOAD_URL, 'string', 'missing export APK_DOWNLOAD_URL');
-    assert.match(a.APK_DOWNLOAD_URL, /^https:\/\/m55681518-byte\.github\.io\/vibecatch\/vibecatch\.apk$/, 'APK hosted on the same GitHub Pages repo');
-    assert.equal(typeof a.buildStrictTrackError, 'function', 'missing export buildStrictTrackError');
-    const msg = a.buildStrictTrackError();
-    assert.match(msg, /This high-security track requires our native Android app to extract/, 'exact user-facing sentence');
-    assert.match(msg, /Download the APK here/i, 'callout present');
-    assert.ok(msg.includes(a.APK_DOWNLOAD_URL), 'message must embed the APK URL');
+    assert.equal(typeof a.buildStrictTrackError, 'undefined', 'APK dead-end helper must be removed');
   });
 
-  test('DiscoverTab renders the native-app card when the flag is set', async () => {
+  test('DiscoverTab offers an honest retry, no APK path', async () => {
     const disc = fs.readFileSync(path.join(root, 'src', 'components', 'DiscoverTab.tsx'), 'utf8');
-    assert.match(disc, /requiresNativeApp/, 'DiscoverTab must branch on the extraction flag');
-    assert.match(disc, /buildStrictTrackError/, 'DiscoverTab must use the shared APK copy helper');
-    assert.match(disc, /This high-security track requires our native Android app to extract/, 'sentence present in the component');
-    assert.match(disc, /APK_DOWNLOAD_URL/, 'DiscoverTab must reference the APK download URL');
+    assert.doesNotMatch(disc, /buildStrictTrackError/, 'DiscoverTab must not use the APK copy helper');
+    assert.doesNotMatch(disc, /APK_DOWNLOAD_URL/, 'DiscoverTab must not reference the APK download URL');
+    assert.doesNotMatch(disc, /requiresNativeApp/, 'DiscoverTab must not branch on the extraction flag');
+    assert.match(disc, /Try again/, 'DiscoverTab retry present');
   });
 });

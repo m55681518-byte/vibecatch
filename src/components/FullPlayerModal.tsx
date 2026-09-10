@@ -23,6 +23,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { triggerPendingSave } from '../services/demuxer';
 import { VisualizerMode } from '../types';
 import { Vinyl3D } from './Visualizers/Vinyl3D';
 import { SpectrumVisualizer } from './Visualizers/SpectrumVisualizer';
@@ -56,6 +57,7 @@ export const FullPlayerModal: React.FC = () => {
     setVisualizerMode,
     downloadTrack,
     downloadProgress,
+    clearDownloadProgress,
     openTrimmer,
     setIsSleepTimerOpen,
     sleepTimerSeconds,
@@ -84,7 +86,9 @@ export const FullPlayerModal: React.FC = () => {
   };
 
   const trackProgress = downloadProgress[currentTrack.id];
-  const isDownloading = trackProgress && trackProgress.stage !== 'ready' && trackProgress.stage !== 'idle';
+  const isDownloading = trackProgress && trackProgress.stage !== 'ready' && trackProgress.stage !== 'idle' && trackProgress.stage !== 'error';
+  const isDownloadError = trackProgress?.stage === 'error';
+  const pendingSave = trackProgress?.stage === 'ready' ? trackProgress.pendingSave : undefined;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-gradient-to-b from-[#101222] via-[#0c0d18] to-[#07080e] backdrop-blur-3xl overflow-y-auto select-none animate-in fade-in zoom-in-95 duration-200">
@@ -335,14 +339,23 @@ export const FullPlayerModal: React.FC = () => {
         <div className="grid grid-cols-5 gap-2 w-full pt-1 pb-2 border-t border-white/10">
           {/* 1. Download MP3 Direct Action */}
           <button
-            onClick={() => downloadTrack(currentTrack)}
-            disabled={isDownloading}
-            className="flex flex-col items-center justify-center p-2 rounded-xl bg-white/5 hover:bg-pink-500/20 text-slate-300 hover:text-pink-300 transition-all active:scale-95 border border-white/5"
-            title="Download MP3 directly to device"
+            onClick={() => {
+              if (pendingSave) {
+                triggerPendingSave(pendingSave);
+                clearDownloadProgress(currentTrack.id);
+              } else {
+                downloadTrack(currentTrack);
+              }
+            }}
+            disabled={pendingSave ? false : isDownloading}
+            className={`flex flex-col items-center justify-center p-2 rounded-xl bg-white/5 hover:bg-pink-500/20 text-slate-300 hover:text-pink-300 transition-all active:scale-95 border border-white/5 ${
+              pendingSave ? 'border-pink-500/60 shadow-glow-pink animate-pulse' : ''
+            }`}
+            title={pendingSave ? 'Tap to save downloaded file' : isDownloadError ? 'Download failed — tap to retry' : 'Download MP3 directly to device'}
           >
-            <Download className={`w-4 h-4 ${isDownloading ? 'animate-bounce text-pink-400' : ''}`} />
+            <Download className={`w-4 h-4 ${isDownloading ? 'animate-bounce text-pink-400' : isDownloadError ? 'text-red-400' : ''}`} />
             <span className="text-[10px] mt-1 font-mono">
-              {isDownloading ? `${trackProgress.percent}%` : 'Save MP3'}
+              {pendingSave ? 'Tap to save' : isDownloading ? `${trackProgress.percent}%` : isDownloadError ? 'Retry' : 'Save MP3'}
             </span>
           </button>
 

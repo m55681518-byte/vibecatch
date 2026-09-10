@@ -1,7 +1,8 @@
 import confetti from 'canvas-confetti';
-import { Track, DemuxProgress } from '../types';
+import { Track, DemuxProgress, ExtractionResult } from '../types';
 import { saveAudioBlob, getAudioBlob, saveTrack } from './db';
 import { pickDownloadUrl, audioFormatMeta, playbackSourceFor, fetchUrlForDownload } from './downloadUrl';
+import { extractYouTubeId } from './extractor';
 
 /**
  * Always-on Cloudflare Pages signer base. It mints signed googlevideo URLs for
@@ -21,6 +22,92 @@ async function discoverRelayBase(): Promise<string | null> {
 }
 
 /**
+ * Try to get a fresh streamUrl for a track whose signed URL may have expired.
+ *
+ * Extracts the YouTube videoId from the track's originalUrl, re-runs the full
+ * 3-tier extractor to mint a brand-new googlevideo signed URL, and persists
+ * the updated streamUrl/downloadUrl back to IndexedDB so subsequent plays and
+ * downloads don't hit the expired URL again.
+ *
+ * Returns the refreshed Track on success, or the original track unchanged on
+ * failure (the caller should surface the original error).
+ */
+async function refreshExpiredStreamUrl(track: Track): Promise<Track> {
+  // Only YouTube tracks have a videoId we can re-resolve
+  const videoId = extractYouTubeId(track.originalUrl || '');
+  if (!videoId) return track;
+
+  // Dynamic import to avoid circular dependency at module load time
+  const { extractMedia } = await import('./extractor');
+  const result: ExtractionResult = await extractMedia(track.originalUrl!);
+  if (!result.success || !result.track) return track;
+
+  // Merge the fresh URLs into the existing track (preserve user edits like
+  // favorite, playlist membership, etc.)
+  const refreshed: Track = {
+    ...track,
+    streamUrl: result.track.streamUrl,
+    downloadUrl: result.track.downloadUrl,
+  };
+
+  // Persist the new URLs so future plays/downloads use the fresh ones
+  try {
+    await saveTrack(refreshed);
+  } catch {
+    // Non-fatal — the in-memory copy is already updated
+  }
+
+  return refreshed;
+}
+
+/**
+ * Map a real HTTP Content-Type returned by the relay/signer to the concrete
+ * { mime, ext } used for blob labeling, IndexedDB persistence and filename.
+ * Returns null when the header is missing/unknown so callers fall back to
+ * audioFormatMeta(track.audioFormat).
+ */
+export function detectDownloadFileMeta(contentType: string | null): { mime: string; ext: string } | null {
+  if (!contentType) return null;
+  const ct = contentType.toLowerCase();
+  if (ct.includes('webm')) return { mime: 'audio/webm', ext: 'webm' };
+  if (ct.includes('ogg') || ct.includes('opus')) return { mime: 'audio/ogg', ext: 'ogg' };
+  if (ct.includes('m4a') || ct.includes('aac')) return { mime: 'audio/mp4', ext: 'm4a' };
+  if (ct.includes('mp4')) return { mime: 'audio/mp4', ext: 'm4a' };
+  if (ct.includes('mpeg') || ct.includes('mp3')) return { mime: 'audio/mpeg', ext: 'mp3' };
+  if (ct.includes('wav') || ct.includes('wave')) return { mime: 'audio/wav', ext: 'wav' };
+  return null;
+}
+
+/**
+ * True on browsers where a programmatic <a download> click fired after async
+ * work (fetch + IndexedDB) is blocked because the initiating tap has lost its
+ * user activation — Chrome for Android and iOS Safari. These need the native
+ * download triggered from a real 'Tap to save' button gesture instead.
+ */
+export function isMobileDownload(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+}
+
+/**
+ * Fire the native download for a pending save inside a fresh (synchronous)
+ * user gesture — call this directly from a button onClick. The blob URL is
+ * revoked lazily (60s) so the browser can finish picking up the download.
+ */
+export function triggerPendingSave(pending: { blobUrl: string; filename: string }): void {
+  const a = document.createElement('a');
+  a.style.display = 'none';
+  a.href = pending.blobUrl;
+  a.download = pending.filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(pending.blobUrl);
+  }, 60000);
+}
+
+/**
  * Downloads media audio stream directly in-memory, saves to IndexedDB,
  * and triggers an instant HTML5 direct file download.
  */
@@ -28,7 +115,7 @@ export async function downloadAudioDirectly(
   track: Track,
   onProgress?: (progress: DemuxProgress) => void
 ): Promise<{ success: boolean; blobUrl?: string; error?: string }> {
-  const { mime: dlMime, ext: dlExt } = audioFormatMeta(track.audioFormat);
+  let { mime: dlMime, ext: dlExt } = audioFormatMeta(track.audioFormat);
   try {
     onProgress?.({
       stage: 'resolving',
@@ -41,6 +128,16 @@ export async function downloadAudioDirectly(
     // Check if we already have the Blob stored in IndexedDB
     let blob = await getAudioBlob(track.id);
 
+    // A blob saved by this code carries its real mime type — use it to label
+    // re-downloads consistently instead of the guessed track.audioFormat.
+    if (blob) {
+      const cachedMeta = detectDownloadFileMeta(blob.type);
+      if (cachedMeta) {
+        dlMime = cachedMeta.mime;
+        dlExt = cachedMeta.ext;
+      }
+    }
+
     if (!blob) {
       onProgress?.({
         stage: 'fetching',
@@ -51,16 +148,49 @@ export async function downloadAudioDirectly(
       });
 
       const relayBase = await discoverRelayBase();
-      const fetchUrl = fetchUrlForDownload(track, relayBase);
+      let fetchUrl = fetchUrlForDownload(track, relayBase);
 
-      const response = await fetch(fetchUrl, {
+      let response = await fetch(fetchUrl, {
         headers: {
           'Accept': 'audio/*, video/*',
         },
       });
 
+      // Expired googlevideo signed URLs return 403 Forbidden or 410 Gone.
+      // Re-resolve via the extractor to mint a fresh signed URL, then retry.
+      if (!response.ok && (response.status === 403 || response.status === 410)) {
+        onProgress?.({
+          stage: 'resolving',
+          percent: 10,
+          bytesLoaded: 0,
+          totalBytes: 0,
+          message: 'Stream URL expired — re-resolving audio...',
+        });
+
+        const freshTrack = await refreshExpiredStreamUrl(track);
+        if (freshTrack.streamUrl !== track.streamUrl || freshTrack.downloadUrl !== track.downloadUrl) {
+          // Update the in-memory track so callers see the fresh URL
+          track.streamUrl = freshTrack.streamUrl;
+          track.downloadUrl = freshTrack.downloadUrl;
+          fetchUrl = fetchUrlForDownload(track, relayBase);
+          response = await fetch(fetchUrl, {
+            headers: { 'Accept': 'audio/*, video/*' },
+          });
+        }
+      }
+
       if (!response.ok) {
         throw new Error(`Failed to fetch media stream (Status: ${response.status})`);
+      }
+
+      // Label blobs/IndexedDB/filename with the REAL Content-Type from the
+      // relay — the source of truth for what the stream actually is. The old
+      // code hardcoded audio/mpeg and derived the extension from the guessed
+      // audioFormat, producing corrupt/failed downloads.
+      const detectedMeta = detectDownloadFileMeta(response.headers.get('content-type'));
+      if (detectedMeta) {
+        dlMime = detectedMeta.mime;
+        dlExt = detectedMeta.ext;
       }
 
       const contentLength = response.headers.get('content-length');
@@ -89,10 +219,10 @@ export async function downloadAudioDirectly(
           }
         }
 
-        blob = new Blob(chunks as BlobPart[], { type: 'audio/mpeg' });
+        blob = new Blob(chunks as BlobPart[], { type: dlMime });
       } else {
         const arrayBuffer = await response.arrayBuffer();
-        blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
+        blob = new Blob([arrayBuffer], { type: dlMime });
       }
 
       onProgress?.({
@@ -122,6 +252,22 @@ export async function downloadAudioDirectly(
     // Create Blob URL for instant native download
     const blobUrl = URL.createObjectURL(blob);
     const filename = `${sanitizeFilename(track.artist)} - ${sanitizeFilename(track.title)}.${dlExt}`;
+
+    if (isMobileDownload()) {
+      // Chrome for Android / iOS Safari block this programmatic <a download>
+      // click after async work — the initiating tap has already lost its user
+      // activation. Surface a 'Tap to save' button (pendingSave) instead, which
+      // triggers the native download from a fresh synchronous click gesture.
+      onProgress?.({
+        stage: 'ready',
+        percent: 100,
+        bytesLoaded: blob.size,
+        totalBytes: blob.size,
+        message: 'Download ready — tap to save.',
+        pendingSave: { blobUrl, filename },
+      });
+      return { success: true, blobUrl };
+    }
 
     const a = document.createElement('a');
     a.style.display = 'none';
@@ -179,13 +325,30 @@ export async function cacheTrackOffline(
       message: 'Fetching audio for offline cache...',
     });
 
-    const response = await fetch(fetchUrlForDownload(track, await discoverRelayBase()));
+    const relayBase = await discoverRelayBase();
+    let fetchUrl = fetchUrlForDownload(track, relayBase);
+    let response = await fetch(fetchUrl);
+
+    // Expired googlevideo signed URLs return 403/410 — re-resolve and retry.
+    if (!response.ok && (response.status === 403 || response.status === 410)) {
+      const freshTrack = await refreshExpiredStreamUrl(track);
+      if (freshTrack.streamUrl !== track.streamUrl || freshTrack.downloadUrl !== track.downloadUrl) {
+        track.streamUrl = freshTrack.streamUrl;
+        track.downloadUrl = freshTrack.downloadUrl;
+        fetchUrl = fetchUrlForDownload(track, relayBase);
+        response = await fetch(fetchUrl);
+      }
+    }
     if (!response.ok) throw new Error('Offline fetch failed');
 
-    const buffer = await response.arrayBuffer();
-    const blob = new Blob([buffer], { type: audioFormatMeta(track.audioFormat).mime });
+    const detectedMeta = detectDownloadFileMeta(response.headers.get('content-type'));
+    const fallbackMeta = audioFormatMeta(track.audioFormat);
+    const cacheMime = detectedMeta?.mime ?? fallbackMeta.mime;
 
-    await saveAudioBlob(track.id, blob, audioFormatMeta(track.audioFormat).mime);
+    const buffer = await response.arrayBuffer();
+    const blob = new Blob([buffer], { type: cacheMime });
+
+    await saveAudioBlob(track.id, blob, cacheMime);
     track.isOfflineAvailable = true;
     track.fileSizeBytes = blob.size;
     await saveTrack(track);
@@ -232,7 +395,15 @@ export async function trimAudioSegment(
   // Trimmer fetches the full file via browser fetch(), so it needs the CORS-safe
   // relay download endpoint — never a raw direct googlevideo URL (no ACAO headers).
   const streamUrl = pickDownloadUrl(track);
-  const response = await fetch(streamUrl);
+  let response = await fetch(streamUrl);
+
+  // Expired googlevideo signed URLs return 403/410 — re-resolve and retry.
+  if (!response.ok && (response.status === 403 || response.status === 410)) {
+    const freshTrack = await refreshExpiredStreamUrl(track);
+    const freshUrl = pickDownloadUrl(freshTrack);
+    response = await fetch(freshUrl);
+  }
+
   const arrayBuffer = await response.arrayBuffer();
 
   const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;

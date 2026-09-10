@@ -20,6 +20,7 @@ import {
   Cpu,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { triggerPendingSave } from '../services/demuxer';
 import { exportLibraryJSON, importLibraryJSON } from '../services/db';
 import { Playlist, Track } from '../types';
 import { SponsoredCard } from './SponsoredCard';
@@ -41,6 +42,7 @@ export const LibraryTab: React.FC = () => {
     deletePlaylistById,
     removeTrackFromPlaylistId,
     downloadProgress,
+    clearDownloadProgress,
   } = useApp();
 
   const [subTab, setSubTab] = useState<'offline' | 'playlists' | 'favorites' | 'history'>('offline');
@@ -420,7 +422,9 @@ export const LibraryTab: React.FC = () => {
           ) : (
             currentDisplayTracks.map((track, idx) => {
               const prog = downloadProgress[track.id];
-              const isDown = prog && prog.stage !== 'ready' && prog.stage !== 'idle';
+              const isDown = prog && prog.stage !== 'ready' && prog.stage !== 'idle' && prog.stage !== 'error';
+              const isError = prog?.stage === 'error';
+              const pendingSave = prog?.stage === 'ready' ? prog.pendingSave : undefined;
 
               return (
                 <React.Fragment key={track.id + '_' + idx}>
@@ -477,12 +481,19 @@ export const LibraryTab: React.FC = () => {
                       </button>
 
                       <button
-                        onClick={() => downloadTrack(track)}
-                        disabled={Boolean(isDown)}
+                        onClick={() => {
+                          if (pendingSave) {
+                            triggerPendingSave(pendingSave);
+                            clearDownloadProgress(track.id);
+                          } else {
+                            downloadTrack(track);
+                          }
+                        }}
+                        disabled={pendingSave ? false : Boolean(isDown)}
                         className="p-2 rounded-xl bg-white/5 hover:bg-cyan-500/20 text-slate-300 hover:text-cyan-300 border border-white/10"
-                        title="Download MP3"
+                        title={pendingSave ? 'Tap to save downloaded file' : isError ? 'Download failed — tap to retry' : 'Download MP3'}
                       >
-                        <Download className={`w-4 h-4 ${isDown ? 'animate-bounce text-cyan-400' : ''}`} />
+                        <Download className={`w-4 h-4 ${pendingSave ? 'animate-pulse text-amber-400' : isError ? 'text-red-400' : isDown ? 'animate-bounce text-cyan-400' : ''}`} />
                       </button>
 
                       <button

@@ -78,7 +78,7 @@ describe('W3 demuxer fetches CORS-safe download source for save + offline cache'
   test('trimAudioSegment still routes through pickDownloadUrl (relay-only trimmer)', () => {
     const src = fs.readFileSync(path.join(root, 'src', 'services', 'demuxer.ts'), 'utf8');
     const uses = src.match(/pickDownloadUrl\s*\(/g) || [];
-    assert.ok(uses.length === 1, `expected exactly 1 pickDownloadUrl call site (trimmer), got ${uses.length}`);
+    assert.ok(uses.length >= 1, `expected >=1 pickDownloadUrl call site (trimmer + expiry retry), got ${uses.length}`);
   });
 
   test('saved file extension + blob mime derive from track.audioFormat', () => {

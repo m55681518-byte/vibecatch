@@ -1,0 +1,3 @@
+resolve 200 rr3---sn-5hne6nzy.googlevideo.com
+stream 206 ACAO=* CT=audio/webm CD=attachment; filename="vibecatch-audio"
+bytes 3433755

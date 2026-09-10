@@ -746,15 +746,15 @@ async function extractYouTube3Tier(cleanUrl: string): Promise<ExtractionResult> 
 
 /**
  * Build the failure result for the all-providers-failed path.
- * When strictTrackSignal is true, surfaces a native-app required card.
- * When false, returns the existing generic busy message.
+ * The strict-track signal is diagnostic only; resolver failures are always
+ * surfaced as an honest, retryable error. There is no native app path — the
+ * APK is a bare webview shell and cannot extract any track the web app cannot.
  */
 export function buildAllProvidersFailedResult(strictTrackSignal: boolean): ExtractionResult {
   if (strictTrackSignal) {
     return {
       success: false,
-      requiresNativeApp: true,
-      error: 'This high-security track requires our native Android app to extract. Download the APK here.',
+      error: 'YouTube blocked audio extraction for this track (all client requests were rejected). This is often temporary — try again, or try a different link.',
     };
   }
   return {

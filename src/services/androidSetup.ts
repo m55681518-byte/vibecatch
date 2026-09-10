@@ -23,7 +23,3 @@ export function shouldShowSetupCard(a: { android: boolean; nodeReachable: boolea
 }
 
 export const APK_DOWNLOAD_URL = 'https://m55681518-byte.github.io/vibecatch/vibecatch.apk';
-
-export function buildStrictTrackError(): string {
-  return `This high-security track requires our native Android app to extract. Download the APK here: ${APK_DOWNLOAD_URL}`;
-}
