@@ -412,6 +412,13 @@ const CORS = {
 
 const YT_ID_RE = /^[A-Za-z0-9_-]{4,}$/;
 
+// Hard ceiling for the /stream upstream fetch to produce headers. YouTube's
+// CDN can accept a connection and then stall forever (throttled/blackholed
+// edge, expired-signature handling); with no ceiling the worker holds the
+// subrequest open for minutes and the browser's fetch() stays pending at
+// "25%" with no progress. 15s lets the browser see a fast 504 and move on.
+const STREAM_UPSTREAM_TIMEOUT_MS = 15000;
+
 export function validVideoId(id) {
   if (!id || typeof id !== 'string') return false;
   if (!YT_ID_RE.test(id)) return false;
@@ -483,16 +490,39 @@ export default {
       const fwdHeaders = {};
       fwdHeaders['Range'] = request.headers.get('range') || 'bytes=0-';
 
+      // Bound the upstream header-wait: abort if the visitor disconnects OR if
+      // the upstream CDN stalls for >15s. Cleared once headers arrive so the
+      // body stream keeps flowing at the CDN's pace.
+      const upstreamController = new AbortController();
+      const upstreamTimer = setTimeout(() => upstreamController.abort(), STREAM_UPSTREAM_TIMEOUT_MS);
+      request.signal.addEventListener('abort', () => {
+        clearTimeout(upstreamTimer);
+        upstreamController.abort();
+      });
+
       let upstreamResp;
       try {
         upstreamResp = await fetch(upstream.href, {
           headers: fwdHeaders,
-          signal: request.signal,
+          signal: upstreamController.signal,
         });
       } catch {
-        return json({ error: 'upstream fetch failed' }, 502);
+        clearTimeout(upstreamTimer);
+        if (request.signal.aborted) {
+          // Visitor gave up — nothing useful to send back
+          return new Response(null, { status: 499, headers: CORS });
+        }
+        return json({ error: 'upstream fetch failed or timed out' }, 504);
       }
+      clearTimeout(upstreamTimer);
       if (upstreamResp.status >= 400) {
+        // Forward 403/410 so the client can detect expired signed URLs and re-resolve
+        if (upstreamResp.status === 403 || upstreamResp.status === 410) {
+          return new Response(null, {
+            status: upstreamResp.status,
+            headers: CORS,
+          });
+        }
         return json({ error: 'upstream failed: ' + upstreamResp.status }, 502);
       }
 

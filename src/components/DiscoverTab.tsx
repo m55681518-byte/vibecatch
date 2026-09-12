@@ -142,7 +142,8 @@ export const DiscoverTab: React.FC = () => {
   const currentPlatform = detectPlatform(inputUrl);
 
   const trackProg = extractedTrack ? downloadProgress[extractedTrack.id] : null;
-  const isDownloadingExtracted = trackProg && trackProg.stage !== 'ready' && trackProg.stage !== 'idle';
+  const isDownloadingExtracted = trackProg && trackProg.stage !== 'ready' && trackProg.stage !== 'idle' && trackProg.stage !== 'error';
+  const isErrorExtracted = trackProg?.stage === 'error';
   const pendingExtractedSave = trackProg?.stage === 'ready' ? trackProg.pendingSave : undefined;
 
   useEffect(() => {
@@ -471,6 +472,18 @@ export const DiscoverTab: React.FC = () => {
             </div>
           )}
 
+          {isErrorExtracted && (
+            <div className="flex items-center space-x-2.5 p-3.5 rounded-2xl bg-red-500/10 border border-red-500/40 text-red-300 text-xs sm:text-sm animate-in fade-in zoom-in-95">
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <div className="flex-1">
+                <span className="font-bold">Download failed — tap &quot;Retry&quot; to try again.</span>
+                {trackProg?.message && (
+                  <p className="text-[11px] text-red-400/80 mt-1 font-mono">{trackProg.message}</p>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-4 sm:space-y-0 sm:space-x-4">
             {/* Thumbnail */}
             <div className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden border border-white/20 flex-shrink-0 shadow-lg group">
@@ -524,11 +537,11 @@ export const DiscoverTab: React.FC = () => {
               }}
               disabled={pendingExtractedSave ? false : Boolean(isDownloadingExtracted)}
               className={`py-2.5 px-3 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-600 hover:to-teal-600 text-white text-xs font-semibold flex items-center justify-center space-x-1.5 shadow-glow-cyan transition-all active:scale-95 disabled:opacity-60 ${
-                pendingExtractedSave ? 'animate-pulse border border-amber-300' : ''
+                pendingExtractedSave ? 'animate-pulse border border-amber-300' : isErrorExtracted ? 'border border-red-400/50' : ''
               }`}
             >
-              <Download className={`w-3.5 h-3.5 ${isDownloadingExtracted ? 'animate-bounce' : ''}`} />
-              <span>{pendingExtractedSave ? 'Tap to save' : isDownloadingExtracted ? `${trackProg?.percent}%` : autoDownloadDone ? 'Download Again' : 'Save MP3'}</span>
+              <Download className={`w-3.5 h-3.5 ${isDownloadingExtracted ? 'animate-bounce' : isErrorExtracted ? 'text-red-400' : ''}`} />
+              <span>{pendingExtractedSave ? 'Tap to save' : isErrorExtracted ? 'Retry' : isDownloadingExtracted ? `${trackProg?.percent}%` : autoDownloadDone ? 'Download Again' : 'Save MP3'}</span>
             </button>
 
             {/* 3. Trim Ringtone */}

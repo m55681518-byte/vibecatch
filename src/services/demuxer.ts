@@ -111,6 +111,57 @@ export function triggerPendingSave(pending: { blobUrl: string; filename: string 
  * Downloads media audio stream directly in-memory, saves to IndexedDB,
  * and triggers an instant HTML5 direct file download.
  */
+const MAX_FETCH_RETRIES = 2;
+const RETRY_BASE_MS = 1200;
+
+/**
+ * Hard ceiling for response HEADERS to arrive. If a fetch never settles
+ * (hanging TCP/TLS to the relay, or a Cloudflare worker subrequest stalled on
+ * the upstream CDN) the browser fetch() stays pending indefinitely — that's
+ * the "frozen at 25%" download stall. No timer anywhere = stuck forever.
+ */
+const FETCH_HEADER_TIMEOUT_MS = 20000;
+/**
+ * Whole-body ceiling for the non-streaming download paths (offline cache,
+ * trimmer) which read the full body via arrayBuffer().
+ */
+const FETCH_BODY_TIMEOUT_MS = 60000;
+/**
+ * Ceiling between consecutive body chunks while draining the relay stream.
+ * Guards against a response whose headers arrive but whose body stalls.
+ */
+const READER_STALL_TIMEOUT_MS = 30000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Pure timer watchdog tied to an AbortController. `arm()` begins a countdown
+ * that aborts the controller if nothing calls `clear()` / re-`arm()`s first.
+ * Rejected aborts surface as catchable errors instead of an eternal freeze.
+ */
+function stallWatchdog(
+  abort: AbortController,
+  ms: number,
+  reason: string
+): { arm: (msOverride?: number) => void; clear: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const arm = (msOverride?: number) => {
+    clearTimeout(timer);
+    const budget = typeof msOverride === 'number' ? msOverride : ms;
+    timer = setTimeout(() => {
+      console.warn(`[DL] STALL: ${reason} — aborting after ${budget}ms`);
+      abort.abort();
+    }, budget);
+  };
+  const clear = () => {
+    clearTimeout(timer);
+    timer = undefined;
+  };
+  return { arm, clear };
+}
+
 export async function downloadAudioDirectly(
   track: Track,
   onProgress?: (progress: DemuxProgress) => void
@@ -131,6 +182,7 @@ export async function downloadAudioDirectly(
     // A blob saved by this code carries its real mime type — use it to label
     // re-downloads consistently instead of the guessed track.audioFormat.
     if (blob) {
+      console.log(`[DL] Using cached blob for "${track.title}" (${(blob.size / 1024).toFixed(0)} KB, type=${blob.type})`);
       const cachedMeta = detectDownloadFileMeta(blob.type);
       if (cachedMeta) {
         dlMime = cachedMeta.mime;
@@ -149,38 +201,101 @@ export async function downloadAudioDirectly(
 
       const relayBase = await discoverRelayBase();
       let fetchUrl = fetchUrlForDownload(track, relayBase);
+      console.log(`[DL] fetchUrl=${fetchUrl}`);
+      console.log(`[DL] track.id=${track.id}  audioFormat=${track.audioFormat}`);
+      console.log(`[DL] track.streamUrl=${track.streamUrl?.slice(0, 120)}  downloadUrl=${track.downloadUrl?.slice(0, 120)}`);
+      console.log(`[DL] download started at ${new Date().toISOString()}`);
 
-      let response = await fetch(fetchUrl, {
-        headers: {
-          'Accept': 'audio/*, video/*',
-        },
-      });
+      let lastErr: any = null;
+      let response: Response | null = null;
 
-      // Expired googlevideo signed URLs return 403 Forbidden or 410 Gone.
-      // Re-resolve via the extractor to mint a fresh signed URL, then retry.
-      if (!response.ok && (response.status === 403 || response.status === 410)) {
-        onProgress?.({
-          stage: 'resolving',
-          percent: 10,
-          bytesLoaded: 0,
-          totalBytes: 0,
-          message: 'Stream URL expired — re-resolving audio...',
-        });
+      for (let attempt = 0; attempt <= MAX_FETCH_RETRIES; attempt++) {
+        const controller = new AbortController();
+        const watchdog = stallWatchdog(
+          controller,
+          FETCH_HEADER_TIMEOUT_MS,
+          `fetch(${fetchUrl.slice(0, 120)}...) never returned headers (attempt ${attempt + 1})`,
+        );
+        try {
+          if (attempt > 0) {
+            const backoff = RETRY_BASE_MS * Math.pow(2, attempt - 1);
+            console.log(`[DL] Retry attempt ${attempt}/${MAX_FETCH_RETRIES} after ${backoff}ms`);
+            onProgress?.({
+              stage: 'fetching',
+              percent: 25,
+              bytesLoaded: 0,
+              totalBytes: 0,
+              message: `Retrying download (attempt ${attempt + 1})...`,
+            });
+            await sleep(backoff);
+          }
 
-        const freshTrack = await refreshExpiredStreamUrl(track);
-        if (freshTrack.streamUrl !== track.streamUrl || freshTrack.downloadUrl !== track.downloadUrl) {
-          // Update the in-memory track so callers see the fresh URL
-          track.streamUrl = freshTrack.streamUrl;
-          track.downloadUrl = freshTrack.downloadUrl;
-          fetchUrl = fetchUrlForDownload(track, relayBase);
+          const fetchStart = performance.now();
+          console.log(`[DL] fetch START (attempt ${attempt + 1}): ${new Date().toISOString()} ${fetchUrl}`);
+
+          watchdog.arm();
           response = await fetch(fetchUrl, {
-            headers: { 'Accept': 'audio/*, video/*' },
+            headers: {
+              'Accept': 'audio/*, video/*',
+            },
+            signal: controller.signal,
           });
+
+          const fetchMs = Math.round(performance.now() - fetchStart);
+          console.log(`[DL] fetch response (${fetchMs}ms, attempt ${attempt + 1}): status=${response.status} content-type=${response.headers.get('content-type')} content-length=${response.headers.get('content-length')} content-range=${response.headers.get('content-range')} redirectUrl=${response.url?.slice(0, 140)}`);
+
+          // Expired googlevideo signed URLs return 403 Forbidden or 410 Gone.
+          // Re-resolve via the extractor to mint a fresh signed URL, then retry.
+          if (!response.ok && (response.status === 403 || response.status === 410)) {
+            console.log(`[DL] Stream expired (${response.status}) — re-resolving...`);
+            onProgress?.({
+              stage: 'resolving',
+              percent: 10,
+              bytesLoaded: 0,
+              totalBytes: 0,
+              message: 'Stream URL expired — re-resolving audio...',
+            });
+
+            const freshTrack = await refreshExpiredStreamUrl(track);
+            if (freshTrack.streamUrl !== track.streamUrl || freshTrack.downloadUrl !== track.downloadUrl) {
+              // Update the in-memory track so callers see the fresh URL
+              track.streamUrl = freshTrack.streamUrl;
+              track.downloadUrl = freshTrack.downloadUrl;
+              fetchUrl = fetchUrlForDownload(track, relayBase);
+              console.log(`[DL] Refreshed fetchUrl=${fetchUrl}`);
+
+              const refreshStart = performance.now();
+              watchdog.arm();
+              response = await fetch(fetchUrl, {
+                headers: { 'Accept': 'audio/*, video/*' },
+                signal: controller.signal,
+              });
+              console.log(`[DL] Retry fetch after refresh (${Math.round(performance.now() - refreshStart)}ms): status=${response.status}`);
+            }
+          }
+
+          if (response.ok) break; // success — exit retry loop
+
+          lastErr = new Error(`Failed to fetch media stream (Status: ${response.status})`);
+          console.warn(`[DL] Non-OK response (attempt ${attempt + 1}):`, lastErr.message);
+
+          // Don't retry on permanent client errors (except 403/410 which are handled above)
+          if (response.status >= 400 && response.status < 500 && response.status !== 403 && response.status !== 410) {
+            break;
+          }
+        } catch (fetchErr: any) {
+          lastErr = fetchErr;
+          console.warn(`[DL] Fetch error (attempt ${attempt + 1}):`, fetchErr?.name, fetchErr?.message || fetchErr);
+          // Network errors (including stall aborts) are transient — retry with fresh controller
+        } finally {
+          watchdog.clear();
         }
       }
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch media stream (Status: ${response.status})`);
+      if (!response || !response.ok) {
+        const msg = lastErr?.message || `Failed to fetch media stream (Status: ${response?.status})`;
+        console.error(`[DL] All attempts failed: ${msg}`);
+        throw new Error(msg);
       }
 
       // Label blobs/IndexedDB/filename with the REAL Content-Type from the
@@ -199,15 +314,43 @@ export async function downloadAudioDirectly(
       // Stream reader for progress updates
       if (response.body && ReadableStream) {
         const reader = response.body.getReader();
+        console.log(`[DL] Got body reader — draining ${totalBytes} bytes`);
         const chunks: Uint8Array[] = [];
         let receivedBytes = 0;
+        let firstChunkMs: number | null = null;
+        const bodyStart = performance.now();
+
+        const bodyStall = new AbortController();
+        bodyStall.signal.addEventListener('abort', () => {
+          console.warn(`[DL] Body-stall abort fired — canceling reader`);
+          reader.cancel().catch(() => {});
+        });
+        const bodyWatchdog = stallWatchdog(
+          bodyStall,
+          READER_STALL_TIMEOUT_MS,
+          `reader stalled (no chunk for 30s at ${(receivedBytes / (1024 * 1024)).toFixed(1)}MB)`,
+        );
 
         while (true) {
-          const { done, value } = await reader.read();
+          bodyWatchdog.arm();
+          let result: ReadableStreamReadResult<Uint8Array>;
+          try {
+            result = await reader.read();
+          } catch (readErr: any) {
+            console.error(`[DL] reader.read() ERROR:`, readErr?.name, readErr?.message || readErr);
+            throw readErr;
+          }
+          bodyWatchdog.clear();
+          const { done, value } = result;
           if (done) break;
           if (value) {
+            if (firstChunkMs === null) {
+              firstChunkMs = Math.round(performance.now() - bodyStart);
+              console.log(`[DL] FIRST chunk after ${firstChunkMs}ms (${value.length}B)`);
+            }
             chunks.push(value);
             receivedBytes += value.length;
+            console.log(`[DL] chunk +${value.length}B => ${(receivedBytes / (1024 * 1024)).toFixed(2)} MB / ${totalBytes} bytes`);
             const pct = Math.min(90, Math.round(25 + (receivedBytes / (totalBytes || 1)) * 60));
             onProgress?.({
               stage: 'demuxing',
@@ -218,12 +361,15 @@ export async function downloadAudioDirectly(
             });
           }
         }
+        bodyWatchdog.clear();
 
         blob = new Blob(chunks as BlobPart[], { type: dlMime });
       } else {
         const arrayBuffer = await response.arrayBuffer();
         blob = new Blob([arrayBuffer], { type: dlMime });
       }
+
+      console.log(`[DL] Blob ready: ${(blob.size / (1024 * 1024)).toFixed(2)} MB, type=${blob.type}`);
 
       onProgress?.({
         stage: 'buffering',
@@ -252,6 +398,7 @@ export async function downloadAudioDirectly(
     // Create Blob URL for instant native download
     const blobUrl = URL.createObjectURL(blob);
     const filename = `${sanitizeFilename(track.artist)} - ${sanitizeFilename(track.title)}.${dlExt}`;
+    console.log(`[DL] Download ready: filename="${filename}" mobile=${isMobileDownload()}`);
 
     if (isMobileDownload()) {
       // Chrome for Android / iOS Safari block this programmatic <a download>
@@ -327,7 +474,18 @@ export async function cacheTrackOffline(
 
     const relayBase = await discoverRelayBase();
     let fetchUrl = fetchUrlForDownload(track, relayBase);
-    let response = await fetch(fetchUrl);
+    console.log(`[DL-cache] fetchUrl=${fetchUrl} (started ${new Date().toISOString()})`);
+
+    const cacheStall = new AbortController();
+    const cacheWatchdog = stallWatchdog(
+      cacheStall,
+      FETCH_HEADER_TIMEOUT_MS,
+      `cache fetch ${fetchUrl.slice(0, 100)}... never returned headers`,
+    );
+    cacheWatchdog.arm();
+    let response = await fetch(fetchUrl, { signal: cacheStall.signal });
+    cacheWatchdog.clear();
+    console.log(`[DL-cache] fetch response: status=${response.status} content-type=${response.headers.get('content-type')} content-length=${response.headers.get('content-length')}`);
 
     // Expired googlevideo signed URLs return 403/410 — re-resolve and retry.
     if (!response.ok && (response.status === 403 || response.status === 410)) {
@@ -336,7 +494,10 @@ export async function cacheTrackOffline(
         track.streamUrl = freshTrack.streamUrl;
         track.downloadUrl = freshTrack.downloadUrl;
         fetchUrl = fetchUrlForDownload(track, relayBase);
-        response = await fetch(fetchUrl);
+        console.log(`[DL-cache] Refreshed fetchUrl=${fetchUrl}`);
+        cacheWatchdog.arm();
+        response = await fetch(fetchUrl, { signal: cacheStall.signal });
+        cacheWatchdog.clear();
       }
     }
     if (!response.ok) throw new Error('Offline fetch failed');
@@ -345,7 +506,9 @@ export async function cacheTrackOffline(
     const fallbackMeta = audioFormatMeta(track.audioFormat);
     const cacheMime = detectedMeta?.mime ?? fallbackMeta.mime;
 
+    cacheWatchdog.arm(FETCH_BODY_TIMEOUT_MS);
     const buffer = await response.arrayBuffer();
+    cacheWatchdog.clear();
     const blob = new Blob([buffer], { type: cacheMime });
 
     await saveAudioBlob(track.id, blob, cacheMime);
@@ -395,16 +558,28 @@ export async function trimAudioSegment(
   // Trimmer fetches the full file via browser fetch(), so it needs the CORS-safe
   // relay download endpoint — never a raw direct googlevideo URL (no ACAO headers).
   const streamUrl = pickDownloadUrl(track);
-  let response = await fetch(streamUrl);
+  const trimStall = new AbortController();
+  const trimWatchdog = stallWatchdog(
+    trimStall,
+    FETCH_HEADER_TIMEOUT_MS,
+    `trimmer fetch ${streamUrl.slice(0, 100)}... never returned headers`,
+  );
+  trimWatchdog.arm();
+  let response = await fetch(streamUrl, { signal: trimStall.signal });
+  trimWatchdog.clear();
 
   // Expired googlevideo signed URLs return 403/410 — re-resolve and retry.
   if (!response.ok && (response.status === 403 || response.status === 410)) {
     const freshTrack = await refreshExpiredStreamUrl(track);
     const freshUrl = pickDownloadUrl(freshTrack);
-    response = await fetch(freshUrl);
+    trimWatchdog.arm();
+    response = await fetch(freshUrl, { signal: trimStall.signal });
+    trimWatchdog.clear();
   }
 
+  trimWatchdog.arm(FETCH_BODY_TIMEOUT_MS);
   const arrayBuffer = await response.arrayBuffer();
+  trimWatchdog.clear();
 
   const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
   const audioCtx = new AudioCtx();

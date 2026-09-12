@@ -38,15 +38,22 @@ export function isDirectStreamUrl(url: string): boolean {
 }
 
 /**
- * True when a host is a YouTube/googlevideo CDN that serves media bytes WITHOUT
- * any Access-Control-Allow-Origin header — i.e. safe to *play* via a plain
+ * True when a host is known to serve media bytes WITHOUT any
+ * Access-Control-Allow-Origin header — i.e. safe to *play* via a plain
  * <audio> element but NOT safe to `fetch()` cross-origin from the PWA.
+ *
+ * Covers YouTube/googlevideo, TikTok CDN, and other known non-CORS CDNs.
+ * When this returns true and a relay is available, the URL MUST be routed
+ * through the CORS relay for byte-downloads.
  */
 export function isNoCorsCdnHost(url: string): boolean {
   if (typeof url !== 'string' || !url) return false;
   try {
     const host = new URL(url).hostname.toLowerCase();
-    return host === 'googlevideo.com' || host.endsWith('.googlevideo.com');
+    if (host === 'googlevideo.com' || host.endsWith('.googlevideo.com')) return true;
+    if (host.endsWith('.tiktokcdn.com') || host.endsWith('.bytecdn.cn') ||
+        host.endsWith('.muscdn.com') || host === 'tikwm.com') return true;
+    return false;
   } catch {
     return false;
   }
@@ -55,20 +62,19 @@ export function isNoCorsCdnHost(url: string): boolean {
 /**
  * Build the CORS-safe URL the browser may `fetch()` for a full-file download.
  *
- * A raw googlevideo CDN URL sends NO `Access-Control-Allow-Origin`, so a browser
- * `fetch()` from the PWA origin is blocked. Such URLs are safe to *play* via a
- * plain <audio> element (no CORS needed) but MUST NOT be fetched for
- * byte-download. When the effective source is a no-CORS googlevideo host we
- * route it through a CORS-enabled relay (`/stream?url=...`), which the relay
- * wraps with `Access-Control-Allow-Origin: *`. Non-CDN https hosts (e.g. a
- * CORS-friendly pixabay asset) pass through unchanged.
+ * Browser `fetch()` from a PWA origin is blocked for any cross-origin URL that
+ * doesn't send `Access-Control-Allow-Origin`. This includes googlevideo (YouTube),
+ * TikTok CDN, and many other media CDNs. To guarantee byte-level downloads work,
+ * ALL external URLs are routed through the CORS relay (`/stream?url=...`), which
+ * wraps responses with `Access-Control-Allow-Origin: *`.
  *
- * - explicit relay `downloadUrl` (e.g. `/download?videoId=`) -> used as-is
- * - raw googlevideo source + relayBase -> wrapped into `<base>/stream?url=<src>`
- * - raw googlevideo source + NO relayBase -> throws a CORS-aware error
- * - any other https source -> returned unchanged
+ * Exceptions (bypass the relay):
+ * - localhost / loopback URLs (local node — already CORS-safe)
+ * - URLs already on the relay host (avoid double-wrapping)
+ * - URLs that are already relay-wrapped (/stream?url= pattern)
+ * - explicit local-node `/download?videoId=` URLs
  *
- * Pure / deterministic; NEVER emits a bare googlevideo cross-origin fetch.
+ * Pure / deterministic.
  */
 export function fetchUrlForDownload(
   track: DownloadSource,
@@ -78,14 +84,37 @@ export function fetchUrlForDownload(
   if (!prefer) {
     throw new Error('No audio source available for this track.');
   }
-  if (isNoCorsCdnHost(prefer)) {
-    if (relayBase) return buildRelayStreamUrl(relayBase, prefer);
-    throw new Error(
-      'CORS block: this track is served by the Google CDN with no cross-origin access. ' +
-      'Enable a relay (local node or pool worker) and try again.'
-    );
+
+  if (!relayBase) {
+    // No relay available — still block bare googlevideo URLs for safety
+    if (isNoCorsCdnHost(prefer)) {
+      throw new Error(
+        'CORS block: this track is served by a CDN with no cross-origin access. ' +
+        'Enable a relay and try again.'
+      );
+    }
+    return prefer;
   }
-  return prefer;
+
+  // Already a relay-wrapped URL (any relay, not just ours) — don't double-wrap
+  if (/\/stream\?url=/.test(prefer)) return prefer;
+
+  try {
+    const urlObj = new URL(prefer);
+    const relayObj = new URL(relayBase);
+
+    // Same host as the relay — don't double-wrap
+    if (urlObj.hostname === relayObj.hostname) return prefer;
+
+    // Localhost / loopback — local node, no CORS issues
+    const h = urlObj.hostname.toLowerCase();
+    if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '0.0.0.0') return prefer;
+  } catch {
+    // URL parse failed — fall through to relay wrap
+  }
+
+  // All other external URLs: route through CORS relay for safety
+  return buildRelayStreamUrl(relayBase, prefer);
 }
 
 /**

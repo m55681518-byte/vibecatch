@@ -71,11 +71,12 @@ describe('C1 fetchUrlForDownload wraps direct CDN through a CORS relay', () => {
     );
   });
 
-  test('non-direct, non-relay stream (plain https) still returns itself', async () => {
+  test('non-direct, non-relay stream (plain https) is routed through the CORS relay', async () => {
     const mod = await loadDownloadUrl();
     const plain = 'https://cdn.example.com/audio.mp3';
     const out = mod.fetchUrlForDownload({ streamUrl: plain, downloadUrl: undefined }, RELAY_BASE);
-    assert.equal(out, plain);
+    const expected = `${RELAY_BASE}/stream?url=${encodeURIComponent(plain)}`;
+    assert.equal(out, expected, 'all external URLs should route through the CORS relay');
   });
 });
 
